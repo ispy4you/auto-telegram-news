@@ -1,6 +1,6 @@
 import hashlib
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -22,7 +22,7 @@ class RssReaderService:
 
     @staticmethod
     def _entry_message_id(entry) -> int:
-        value = entry.get("id") or entry.get("link") or entry.get("title") or str(datetime.utcnow().timestamp())
+        value = entry.get("id") or entry.get("link") or entry.get("title") or str(datetime.now(timezone.utc).timestamp())
         return int(hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:12], 16)
 
     @staticmethod
@@ -191,6 +191,6 @@ class RssReaderService:
             )
             new_count += 1
 
-        source.last_fetched_at = datetime.utcnow()
+        source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
         db.commit()
         return new_count

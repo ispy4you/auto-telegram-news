@@ -8,6 +8,7 @@
 {% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
 
 <form method="post" action="/settings">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 <div class="row g-4">
 
   {# Основные параметры #}
@@ -33,7 +34,7 @@
             {% if 'fetch_interval_seconds' not in cfg %}
             <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Из .env: {{ env.fetch_interval_seconds }}с</div>
             {% else %}
-            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД (требует перезапуска)</div>
+            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД (применяется сразу)</div>
             {% endif %}
           </div>
 
@@ -118,6 +119,7 @@
   <div class="card-body">
     <p class="text-muted small mb-3">Удаляет медиафайлы и записи о них из БД, если они старше указанного количества дней. Сами посты не удаляются.</p>
     <form method="post" action="/settings/cleanup-media" class="d-flex gap-2 align-items-center">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="text-nowrap small mb-0">Удалить медиа старше</label>
       <input type="number" class="form-control form-control-sm" name="days" value="30" min="1" style="width:80px">
       <label class="small mb-0">дней</label>

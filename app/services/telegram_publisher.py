@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from aiogram import Bot
@@ -78,7 +78,7 @@ class TelegramPublisherService:
                     await bot.send_message(chat_id=target.chat_id, text=text)
 
             generated.status = GeneratedPostStatus.PUBLISHED.value
-            generated.published_at = datetime.utcnow()
+            generated.published_at = datetime.now(timezone.utc).replace(tzinfo=None)
             raw_post.status = RawPostStatus.PUBLISHED.value
             job.status = PublishJobStatus.SUCCESS.value
             db.add(ActionLog(action="publish_success", entity_type="GeneratedPost", entity_id=str(generated.id), message=f"Published to {target.chat_id}"))

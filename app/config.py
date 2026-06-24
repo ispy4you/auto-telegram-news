@@ -51,4 +51,11 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    s = Settings()
+    if s.app_env != "local":
+        import sys
+        if s.app_secret_key == "change_me":
+            sys.exit("FATAL: APP_SECRET_KEY не задан или равен дефолтному значению. Установите его в .env")
+        if s.admin_password == "change_me":
+            sys.exit("FATAL: ADMIN_PASSWORD не задан или равен дефолтному значению. Установите его в .env")
+    return s

@@ -8,7 +8,7 @@
 <td>{{ g.id }}</td><td>{{ g.raw_post_id }}</td><td>{{ g.status }}</td><td>{{ (g.edited_text or g.generated_text or '')[:180] }}</td>
 <td>
 <a class="btn btn-sm btn-outline-dark" href="/posts/{{ g.raw_post_id }}">Edit</a>
-<form method="post" action="/generated/{{ g.id }}/reject" class="d-inline"><button class="btn btn-sm btn-outline-danger">Reject</button></form>
+<form method="post" action="/generated/{{ g.id }}/reject" class="d-inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn btn-sm btn-outline-danger">Reject</button></form>
 </td>
 </tr>
 {% endfor %}

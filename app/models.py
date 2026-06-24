@@ -1,5 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -53,8 +57,8 @@ class SourceChannel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     posts = relationship("RawPost", back_populates="source", cascade="all, delete-orphan")
 
@@ -69,8 +73,8 @@ class TargetChannel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_mode: Mapped[str] = mapped_column(String(16), default="manual")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class SourceTargetRoute(Base):
@@ -97,7 +101,7 @@ class RawPost(Base):
     normalized_text: Mapped[str] = mapped_column(Text, default="")
     text_hash: Mapped[str] = mapped_column(String(64), index=True)
     published_at_source: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     has_media: Mapped[bool] = mapped_column(Boolean, default=False)
     media_count: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default=RawPostStatus.NEW.value)
@@ -105,8 +109,8 @@ class RawPost(Base):
     dedupe_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     ai_suitable: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     ai_skip_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     source = relationship("SourceChannel", back_populates="posts")
     media_items = relationship("MediaItem", back_populates="raw_post", cascade="all, delete-orphan")
@@ -127,7 +131,7 @@ class MediaItem(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     raw_post = relationship("RawPost", back_populates="media_items")
 
@@ -145,8 +149,8 @@ class GeneratedPost(Base):
     status: Mapped[str] = mapped_column(String(16), default=GeneratedPostStatus.DRAFT.value)
     generation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     raw_post = relationship("RawPost", back_populates="generated_posts")
@@ -163,8 +167,8 @@ class PublishJob(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     generated_post = relationship("GeneratedPost", back_populates="publish_jobs")
 
@@ -174,7 +178,7 @@ class AppSetting(Base):
 
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class ActionLog(Base):
@@ -185,4 +189,4 @@ class ActionLog(Base):
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[str] = mapped_column(String(64))
     message: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

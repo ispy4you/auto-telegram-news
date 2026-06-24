@@ -13,6 +13,7 @@
   <div class="card-header bg-white fw-semibold">Добавить источник</div>
   <div class="card-body">
     <form method="post" action="/sources" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="col-md-2">
         <label class="form-label small text-muted mb-1">Тип</label>
         <select class="form-select" name="source_type" id="src-type" onchange="toggleRssField()">
@@ -93,14 +94,17 @@
           <td class="text-end pe-3">
             <div class="d-flex gap-1 justify-content-end">
               <form method="post" action="/sources/{{ s.id }}/fetch">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-primary" title="Собрать посты"><i class="bi bi-cloud-download"></i></button>
               </form>
               <form method="post" action="/sources/{{ s.id }}/toggle">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-secondary" title="{{ 'Отключить' if s.enabled else 'Включить' }}">
                   <i class="bi bi-{{ 'pause' if s.enabled else 'play' }}"></i>
                 </button>
               </form>
               <form method="post" action="/sources/{{ s.id }}/delete" onsubmit="return confirm('Удалить источник «{{ s.title }}» и все его посты?')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-trash"></i></button>
               </form>
             </div>

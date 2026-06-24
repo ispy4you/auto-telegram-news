@@ -19,6 +19,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="fw-semibold mb-0">Посты <span class="text-muted fw-normal fs-6">({{ total }})</span></h4>
   <form method="post" action="/posts/fetch-now">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button class="btn btn-success btn-sm"><i class="bi bi-arrow-clockwise me-1"></i>Собрать сейчас</button>
   </form>
 </div>
@@ -61,6 +62,7 @@
 
 {# Bulk-форма — отдельная, вне карточек #}
 <form method="post" action="/posts/bulk" id="bulk-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <div id="bulk-hidden-ids"></div>
   <div class="d-none align-items-center gap-2 mb-3 p-2 bg-light rounded" id="bulk-bar">
     <div class="form-check mb-0">
@@ -124,10 +126,12 @@
       <a class="btn btn-sm btn-outline-dark" href="/posts/{{ p.id }}">Открыть</a>
       {% if p.status not in ('rejected', 'published') %}
       <form method="post" action="/posts/{{ p.id }}/reject">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="btn btn-sm btn-outline-warning">Отклонить</button>
       </form>
       {% endif %}
       <form method="post" action="/posts/{{ p.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="btn btn-sm btn-outline-danger">Удалить</button>
       </form>
     </div>
@@ -135,6 +139,7 @@
     {% if p.status != 'published' and targets %}
     <div class="card-footer bg-transparent border-top pt-1 pb-2">
       <form method="post" action="/posts/{{ p.id }}/publish-raw" class="d-flex gap-1">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <select name="target_channel_id" class="form-select form-select-sm">
           {% for t in targets %}<option value="{{ t.id }}">{{ t.title }}</option>{% endfor %}
         </select>

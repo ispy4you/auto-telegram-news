@@ -1,9 +1,9 @@
 import hashlib
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from rapidfuzz import fuzz
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import RawPost, RawPostStatus
@@ -45,13 +45,19 @@ class DeduplicationService:
             post.dedupe_score = 100.0
             return post
 
-        boundary = datetime.utcnow() - timedelta(hours=48)
+        boundary = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
+        text_len = len(post.normalized_text)
         candidates = db.scalars(
             select(RawPost).where(
                 RawPost.id != post.id,
                 RawPost.created_at >= boundary,
                 RawPost.status != RawPostStatus.FAILED.value,
-            )
+                # Pre-filter by approximate text length to avoid loading very short/long posts
+                func.length(RawPost.normalized_text).between(
+                    max(1, text_len // 2),
+                    text_len * 2 + 1,
+                ),
+            ).limit(500)
         ).all()
 
         for candidate in candidates:

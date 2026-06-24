@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -141,7 +141,7 @@ class TelegramReaderService:
             if post:
                 new_count += 1
 
-        source.last_fetched_at = datetime.utcnow()
+        source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
         if last_msg_id:
             source.last_message_id = last_msg_id
         db.commit()

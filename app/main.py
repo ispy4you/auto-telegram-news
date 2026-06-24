@@ -11,6 +11,7 @@ from app.database import Base, SessionLocal, engine
 from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
 from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
+from app.web.csrf import CSRFMiddleware
 from app.web.routes import router
 
 settings = get_settings()
@@ -19,8 +20,6 @@ Path("data/telegram_session").mkdir(parents=True, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 with SessionLocal() as db:
     ensure_default_prompt_settings(db)
-    # Reset posts stuck in FAILED due to server crash during publish — mark them back to GENERATED
-    # so the operator can retry manually. Only resets if publish_error is None (crash, not API error).
     from sqlalchemy import select, update
     db.execute(
         update(RawPost)
@@ -46,9 +45,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Telegram News Bot Admin", lifespan=lifespan)
+# Middleware order: last-added runs first (outermost). Session must run before CSRF.
+# So we add CSRF first (inner), then Session (outer).
+app.add_middleware(CSRFMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=settings.app_secret_key)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
-app.mount("/media", StaticFiles(directory="data/media"), name="media")
+# /media is served via an authenticated route in routes.py — not a public StaticFiles mount.
 app.include_router(router)
 
 

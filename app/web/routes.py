@@ -1,22 +1,22 @@
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, Request
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import ActionLog, AppSetting, GeneratedPost, GeneratedPostStatus, MediaItem, RawPost, RawPostStatus, SourceChannel, TargetChannel
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
 from app.services.news_pipeline import NewsPipelineService
 from app.services.source_reader import SourceReaderService
-from app.services.telegram_reader import TelegramReaderService
 from app.services.telegram_publisher import TelegramPublisherService
+from app.services.telegram_reader import TelegramReaderService
 from app.web.auth import login_action, require_auth
 
 router = APIRouter()
@@ -24,17 +24,16 @@ templates = Jinja2Templates(directory="app/web/templates")
 
 
 def _localdt_filter(dt, tz_name: str, fmt: str = "%d.%m.%Y %H:%M") -> str:
-    """Convert a naive UTC datetime to the given timezone and format it."""
     if dt is None:
         return "—"
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-    from datetime import timezone
+    from datetime import timezone as _tz
     try:
         tz = ZoneInfo(tz_name)
     except (ZoneInfoNotFoundError, Exception):
         tz = ZoneInfo("Europe/Moscow")
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=_tz.utc)
     return dt.astimezone(tz).strftime(fmt)
 
 
@@ -50,7 +49,11 @@ def _nav_counts(db: Session) -> dict:
 
 
 def tpl(request: Request, name: str, db: Session, ctx: dict = None):
-    return templates.TemplateResponse(request, name, {**(ctx or {}), **_nav_counts(db)})
+    return templates.TemplateResponse(request, name, {
+        **(ctx or {}),
+        **_nav_counts(db),
+        "csrf_token": request.session.get("csrf_token", ""),
+    })
 
 
 def _to_bool(value: str | None) -> bool:
@@ -66,9 +69,17 @@ def _parse_optional_int(value: str | None) -> int | None:
         return None
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
 @router.get("/login", response_class=HTMLResponse)
 def login_page(request: Request):
-    return templates.TemplateResponse(request, "login.html")
+    return templates.TemplateResponse(request, "login.html", {
+        "csrf_token": request.session.get("csrf_token", ""),
+    })
 
 
 @router.post("/login")
@@ -76,9 +87,22 @@ def login(request: Request, username: str = Form(...), password: str = Form(...)
     return login_action(request, username, password)
 
 
+# ── Media (authenticated) ─────────────────────────────────────────────────────
+
+@router.get("/media/{path:path}")
+def serve_media(path: str, _: bool = Depends(require_auth)):
+    file = Path("data/media") / path
+    if not file.is_file():
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404)
+    return FileResponse(file)
+
+
+# ── Dashboard ─────────────────────────────────────────────────────────────────
+
 @router.get("/")
 async def dashboard(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    from datetime import date, timedelta
+    from datetime import date
     today = date.today()
     week_ago = today - timedelta(days=7)
 
@@ -97,8 +121,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db), _: bool = D
     recent_logs = db.scalars(select(ActionLog).order_by(ActionLog.created_at.desc()).limit(15)).all()
     pending_posts = db.scalars(select(RawPost).options(joinedload(RawPost.source)).where(RawPost.status.in_(["new", "ready"])).order_by(RawPost.created_at.desc()).limit(10)).all()
     targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
-    return templates.TemplateResponse(request, "dashboard.html", {
-        **_nav_counts(db),
+    return tpl(request, "dashboard.html", db, {
         "stats": stats,
         "recent_logs": recent_logs,
         "pending_posts": pending_posts,
@@ -124,7 +147,6 @@ async def scheduler_status(request: Request, _: bool = Depends(require_auth)):
 
 @router.post("/fetch-now")
 async def fetch_now(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    # Trigger manual run and reset scheduler timer
     sched = getattr(request.app.state, "scheduler", None)
     if sched:
         await sched._safe_run()
@@ -133,10 +155,11 @@ async def fetch_now(request: Request, db: Session = Depends(get_db), _: bool = D
     return RedirectResponse(url="/", status_code=302)
 
 
+# ── Sources ───────────────────────────────────────────────────────────────────
+
 @router.get("/sources")
 def sources(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), error: str | None = None, ok: str | None = None):
     items = db.scalars(select(SourceChannel).order_by(SourceChannel.created_at.desc())).all()
-    # Stats per source: total posts, published posts
     source_ids = [s.id for s in items]
     post_totals = {row[0]: row[1] for row in db.execute(
         select(RawPost.source_id, func.count()).where(RawPost.source_id.in_(source_ids)).group_by(RawPost.source_id)
@@ -160,28 +183,10 @@ def create_source(
     _: bool = Depends(require_auth),
 ):
     if source_type == "rss":
-        db.add(
-            SourceChannel(
-                title=title,
-                username=None,
-                source_type="rss",
-                rss_url=rss_url.strip(),
-                url=rss_url.strip(),
-                enabled=True,
-            )
-        )
+        db.add(SourceChannel(title=title, username=None, source_type="rss", rss_url=rss_url.strip(), url=rss_url.strip(), enabled=True))
     else:
         username = TelegramReaderService._extract_username(username_or_url)
-        db.add(
-            SourceChannel(
-                title=title,
-                username=username,
-                source_type="telethon",
-                rss_url=None,
-                url=f"https://t.me/{username}",
-                enabled=True,
-            )
-        )
+        db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True))
     db.commit()
     return RedirectResponse(url="/sources", status_code=302)
 
@@ -218,6 +223,8 @@ async def fetch_source(source_id: int, db: Session = Depends(get_db), _: bool = 
         import urllib.parse
         return RedirectResponse(url=f"/sources?error={urllib.parse.quote(str(exc))}", status_code=302)
 
+
+# ── Targets ───────────────────────────────────────────────────────────────────
 
 @router.get("/targets")
 def targets(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None, error: str | None = None):
@@ -273,6 +280,8 @@ async def test_target(target_id: int, db: Session = Depends(get_db), _: bool = D
     return RedirectResponse(url=f"/targets?error={urllib.parse.quote(f'{target.title}: {msg}')}", status_code=302)
 
 
+# ── Posts ─────────────────────────────────────────────────────────────────────
+
 _POSTS_PER_PAGE = 50
 
 
@@ -299,19 +308,22 @@ def posts(
         query = query.where(RawPost.status == status)
     if parsed_source_id is not None:
         query = query.where(RawPost.source_id == parsed_source_id)
+    search_limit = None
     if q:
-        query = query.where(or_(RawPost.original_text.ilike(f"%{q}%"), RawPost.normalized_text.ilike(f"%{q}%")))
+        where_clause = or_(RawPost.original_text.ilike(f"%{q}%"), RawPost.normalized_text.ilike(f"%{q}%"))
+        query = query.where(where_clause)
+        search_limit = 2000  # cap full-table scan; applied only to data fetch, not count
 
     total = db.scalar(select(func.count()).select_from(query.subquery()))
     page = max(1, page)
     offset = (page - 1) * _POSTS_PER_PAGE
-    items = db.scalars(query.offset(offset).limit(_POSTS_PER_PAGE)).all()
+    data_query = query.limit(search_limit) if search_limit else query
+    items = db.scalars(data_query.offset(offset).limit(_POSTS_PER_PAGE)).all()
 
     total_pages = max(1, (total + _POSTS_PER_PAGE - 1) // _POSTS_PER_PAGE)
     sources = db.scalars(select(SourceChannel).order_by(SourceChannel.title)).all()
     targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
     filters = {"q": q or "", "source_id": source_id or "", "status": status or "", "sort": sort or ""}
-    # Base query string for pagination links (all params except page)
     import urllib.parse as _up
     base_qs = _up.urlencode({k: v for k, v in filters.items() if v})
     return tpl(request, "posts.html", db, {
@@ -320,9 +332,31 @@ def posts(
     })
 
 
+async def _bulk_generate_task(ids: list[int]) -> None:
+    with SessionLocal() as db:
+        posts_q = db.scalars(select(RawPost).where(RawPost.id.in_(ids))).all()
+        for p in posts_q:
+            try:
+                result = await AiGatewayClient().generate_news_post(p, db)
+                db.add(GeneratedPost(
+                    raw_post_id=p.id,
+                    generated_text=result.text,
+                    model_name=result.model_name,
+                    status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
+                    generation_error=result.reason if not result.suitable else None,
+                ))
+                p.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
+                p.ai_suitable = result.suitable
+                p.ai_skip_reason = result.reason if not result.suitable else None
+            except Exception as exc:
+                db.add(ActionLog(action="bulk_generate_error", entity_type="RawPost", entity_id=str(p.id), message=str(exc)))
+        db.commit()
+
+
 @router.post("/posts/bulk")
 async def posts_bulk(
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -343,19 +377,9 @@ async def posts_bulk(
             db.delete(p)
         db.commit()
     elif action == "generate":
-        for p in posts_q:
-            result = await AiGatewayClient().generate_news_post(p, db)
-            db.add(GeneratedPost(
-                raw_post_id=p.id,
-                generated_text=result.text,
-                model_name=result.model_name,
-                status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
-                generation_error=result.reason if not result.suitable else None,
-            ))
-            p.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
-            p.ai_suitable = result.suitable
-            p.ai_skip_reason = result.reason if not result.suitable else None
-        db.commit()
+        # Run in background to avoid blocking the event loop for N×60s
+        background_tasks.add_task(_bulk_generate_task, ids)
+        return RedirectResponse(url="/posts?ok=Генерация+запущена+в+фоне", status_code=302)
 
     return RedirectResponse(url="/posts", status_code=302)
 
@@ -370,40 +394,50 @@ async def posts_fetch_now(db: Session = Depends(get_db), _: bool = Depends(requi
 def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     post = db.scalar(
         select(RawPost)
-        .options(
-            joinedload(RawPost.source),
-            selectinload(RawPost.media_items),
-            selectinload(RawPost.generated_posts),
-        )
+        .options(joinedload(RawPost.source), selectinload(RawPost.media_items), selectinload(RawPost.generated_posts))
         .where(RawPost.id == post_id)
     )
     targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
     return tpl(request, "post_detail.html", db, {"post": post, "targets": targets})
 
 
+async def _do_generate(post_id: int, db: Session) -> None:
+    post = db.get(RawPost, post_id)
+    if not post:
+        return
+    result = await AiGatewayClient().generate_news_post(post, db)
+    db.add(GeneratedPost(
+        raw_post_id=post.id,
+        generated_text=result.text,
+        model_name=result.model_name,
+        status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
+        generation_error=result.reason if not result.suitable else None,
+    ))
+    post.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
+    post.ai_suitable = result.suitable
+    post.ai_skip_reason = result.reason if not result.suitable else None
+    db.commit()
+
+
 @router.post("/posts/{post_id}/generate")
 async def generate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    post = db.get(RawPost, post_id)
-    if post:
-        result = await AiGatewayClient().generate_news_post(post, db)
-        db.add(GeneratedPost(raw_post_id=post.id, generated_text=result.text, model_name=result.model_name, status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value, generation_error=result.reason if not result.suitable else None))
-        post.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
-        post.ai_suitable = result.suitable
-        post.ai_skip_reason = result.reason if not result.suitable else None
-        db.commit()
+    await _do_generate(post_id, db)
     return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
 
 
 @router.post("/posts/{post_id}/regenerate")
 async def regenerate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    post = db.get(RawPost, post_id)
-    if post:
-        result = await AiGatewayClient().generate_news_post(post, db)
-        db.add(GeneratedPost(raw_post_id=post.id, generated_text=result.text, model_name=result.model_name, status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value, generation_error=result.reason if not result.suitable else None))
-        post.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
-        post.ai_suitable = result.suitable
-        post.ai_skip_reason = result.reason if not result.suitable else None
-        db.commit()
+    # Mark any existing drafts as rejected before creating a new generation
+    existing_drafts = db.scalars(
+        select(GeneratedPost).where(
+            GeneratedPost.raw_post_id == post_id,
+            GeneratedPost.status == GeneratedPostStatus.DRAFT.value,
+        )
+    ).all()
+    for gp in existing_drafts:
+        gp.status = GeneratedPostStatus.REJECTED.value
+    db.flush()
+    await _do_generate(post_id, db)
     return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
 
 
@@ -415,11 +449,7 @@ async def publish_raw_post(
     _: bool = Depends(require_auth),
 ):
     from sqlalchemy.orm import selectinload as _sil
-    post = db.scalar(
-        select(RawPost)
-        .options(_sil(RawPost.media_items))
-        .where(RawPost.id == post_id)
-    )
+    post = db.scalar(select(RawPost).options(_sil(RawPost.media_items)).where(RawPost.id == post_id))
     if not post:
         return RedirectResponse(url="/posts", status_code=302)
 
@@ -427,12 +457,7 @@ async def publish_raw_post(
     if not text and not post.has_media:
         return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
 
-    generated = GeneratedPost(
-        raw_post_id=post.id,
-        generated_text=text,
-        model_name="raw",
-        status=GeneratedPostStatus.APPROVED.value,
-    )
+    generated = GeneratedPost(raw_post_id=post.id, generated_text=text, model_name="raw", status=GeneratedPostStatus.APPROVED.value)
     db.add(generated)
     post.status = RawPostStatus.GENERATED.value
     db.flush()
@@ -465,11 +490,13 @@ def delete_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(r
     return RedirectResponse(url="/posts", status_code=302)
 
 
+# ── Generated posts ───────────────────────────────────────────────────────────
+
 @router.get("/generated")
 def generated_posts(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     items = db.scalars(select(GeneratedPost).options(joinedload(GeneratedPost.raw_post)).order_by(GeneratedPost.created_at.desc()).limit(200)).all()
     targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
-    return templates.TemplateResponse(request, "generated_posts.html", {"items": items, "targets": targets})
+    return tpl(request, "generated_posts.html", db, {"items": items, "targets": targets})
 
 
 @router.post("/generated/{generated_id}/save")
@@ -504,6 +531,8 @@ def reject_generated(generated_id: int, db: Session = Depends(get_db), _: bool =
     return RedirectResponse(url="/generated", status_code=302)
 
 
+# ── Settings ──────────────────────────────────────────────────────────────────
+
 @router.get("/settings")
 def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None):
     ensure_default_prompt_settings(db)
@@ -511,7 +540,6 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
     rows = db.scalars(select(AppSetting)).all()
     cfg = {r.key: r.value for r in rows}
     env = get_settings()
-    # Media disk usage
     media_dir = Path("data/media")
     media_size_mb = sum(f.stat().st_size for f in media_dir.rglob("*") if f.is_file()) // 1024 // 1024 if media_dir.exists() else 0
     return tpl(request, "settings.html", db, {
@@ -527,6 +555,7 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
 
 @router.post("/settings")
 def settings_save(
+    request: Request,
     duplicate_threshold: str = Form("88"),
     fetch_interval_seconds: str = Form("120"),
     max_media_mb: str = Form("50"),
@@ -537,21 +566,35 @@ def settings_save(
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    # Validate timezone
+    # Validate and clamp numeric inputs
+    try:
+        threshold = max(50, min(100, int(duplicate_threshold)))
+    except (ValueError, TypeError):
+        threshold = 88
+    try:
+        interval = max(30, min(86400, int(fetch_interval_seconds)))
+    except (ValueError, TypeError):
+        interval = 120
+    try:
+        media_mb = max(1, min(500, int(max_media_mb)))
+    except (ValueError, TypeError):
+        media_mb = 50
+
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
     try:
         ZoneInfo(display_timezone)
     except (ZoneInfoNotFoundError, Exception):
         display_timezone = "Europe/Moscow"
+
     values = {
-        "duplicate_threshold": duplicate_threshold,
-        "fetch_interval_seconds": fetch_interval_seconds,
-        "max_media_mb": max_media_mb,
+        "duplicate_threshold": str(threshold),
+        "fetch_interval_seconds": str(interval),
+        "max_media_mb": str(media_mb),
         "display_timezone": display_timezone,
         "ai_system_prompt": ai_system_prompt,
         "ai_prompt_template": ai_prompt_template,
         "global_auto_publish_enabled": "true" if _to_bool(global_auto_publish_enabled) else "false",
-        "updated_at": datetime.utcnow().isoformat(),
+        "updated_at": _utcnow().isoformat(),
     }
     for k, v in values.items():
         row = db.get(AppSetting, k)
@@ -560,8 +603,19 @@ def settings_save(
         else:
             db.add(AppSetting(key=k, value=v))
     db.commit()
+
+    # Apply new interval to the running scheduler without a restart
+    sched = getattr(request.app.state, "scheduler", None)
+    if sched:
+        try:
+            sched.update_interval(interval)
+        except Exception:
+            pass
+
     return RedirectResponse(url="/settings", status_code=302)
 
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
 
 @router.get("/logs")
 def logs(
@@ -581,16 +635,16 @@ def logs(
     return tpl(request, "logs.html", db, {"items": items, "all_actions": all_actions, "filters": {"action": action or "", "q": q or ""}})
 
 
+# ── Media cleanup ─────────────────────────────────────────────────────────────
+
 @router.post("/settings/cleanup-media")
 def cleanup_media(
     days: int = Form(30),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    old_items = db.scalars(
-        select(MediaItem).where(MediaItem.created_at < cutoff)
-    ).all()
+    cutoff = _utcnow() - timedelta(days=days)
+    old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
     deleted_files = 0
     freed_bytes = 0
     for item in old_items:
