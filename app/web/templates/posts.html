@@ -1,0 +1,215 @@
+{% extends "base.html" %}
+{% block content %}
+<script>
+// Восстановление фильтров: запускается ДО рендера — редирект незаметен для пользователя
+(function () {
+  const KEY = 'postFilters';
+  const qs = window.location.search;
+  if (!qs || qs === '?') {
+    const saved = sessionStorage.getItem(KEY);
+    if (saved && saved.length > 1) {
+      window.location.replace('/posts' + saved);
+    }
+  } else {
+    sessionStorage.setItem(KEY, qs);
+  }
+})();
+</script>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="fw-semibold mb-0">Посты <span class="text-muted fw-normal fs-6">({{ total }})</span></h4>
+  <form method="post" action="/posts/fetch-now">
+    <button class="btn btn-success btn-sm"><i class="bi bi-arrow-clockwise me-1"></i>Собрать сейчас</button>
+  </form>
+</div>
+
+{# Фильтры #}
+<form method="get" class="row g-2 mb-3" id="filter-form">
+  <div class="col-md-3">
+    <input class="form-control form-control-sm" name="q" placeholder="Поиск по тексту" value="{{ filters.q }}">
+  </div>
+  <div class="col-md-2">
+    <select class="form-select form-select-sm" name="source_id">
+      <option value="">Все источники</option>
+      {% for s in sources %}
+      <option value="{{ s.id }}" {% if filters.source_id == s.id|string %}selected{% endif %}>{{ s.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select form-select-sm" name="status">
+      <option value="">Все статусы</option>
+      {% for st in ['new', 'ready', 'generated', 'published', 'rejected', 'duplicate', 'failed'] %}
+      <option value="{{ st }}" {% if filters.status == st %}selected{% endif %}>{{ st }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-2">
+    <select class="form-select form-select-sm" name="sort">
+      <option value="" {% if not filters.sort %}selected{% endif %}>Новые сначала</option>
+      <option value="oldest" {% if filters.sort == 'oldest' %}selected{% endif %}>Старые сначала</option>
+      <option value="source" {% if filters.sort == 'source' %}selected{% endif %}>По источнику</option>
+      <option value="status" {% if filters.sort == 'status' %}selected{% endif %}>По статусу</option>
+    </select>
+  </div>
+  <input type="hidden" name="page" value="1">
+  <div class="col-auto">
+    <button class="btn btn-outline-primary btn-sm">Фильтр</button>
+    <a href="/posts" class="btn btn-outline-secondary btn-sm" onclick="sessionStorage.removeItem('postFilters')">Сброс</a>
+  </div>
+</form>
+
+{# Bulk-форма — отдельная, вне карточек #}
+<form method="post" action="/posts/bulk" id="bulk-form">
+  <div id="bulk-hidden-ids"></div>
+  <div class="d-none align-items-center gap-2 mb-3 p-2 bg-light rounded" id="bulk-bar">
+    <div class="form-check mb-0">
+      <input class="form-check-input" type="checkbox" id="select-all">
+      <label class="form-check-label text-muted small" for="select-all">Выбрать все</label>
+    </div>
+    <span class="text-muted small ms-2" id="selected-count">0 выбрано</span>
+    <div class="ms-auto d-flex gap-2">
+      <button type="submit" name="bulk_action" value="generate" class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-stars me-1"></i>Генерировать AI
+      </button>
+      <button type="submit" name="bulk_action" value="reject" class="btn btn-sm btn-outline-warning">Отклонить</button>
+      <button type="submit" name="bulk_action" value="delete" class="btn btn-sm btn-outline-danger">Удалить</button>
+    </div>
+  </div>
+</form>
+
+{# Карточки #}
+<div class="row g-3">
+{% for p in items %}
+{% set sc = {'new':'primary','ready':'info','generated':'success','published':'success','rejected':'danger','duplicate':'secondary','failed':'danger'}.get(p.status, 'secondary') %}
+
+<div class="col-md-6 col-xl-4">
+  <div class="card h-100 shadow-sm border-{{ sc }} border-start border-3">
+    <div class="card-body pb-2">
+
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <input class="form-check-input post-checkbox mt-0" type="checkbox" data-id="{{ p.id }}">
+          <span class="badge bg-{{ sc }} {% if p.status == 'ready' %}text-dark{% endif %}">{{ p.status }}</span>
+          {% if p.media_count %}
+          <span class="badge bg-light text-dark border" title="{{ p.media_count }} медиафайлов">
+            <i class="bi bi-paperclip"></i> {{ p.media_count }}
+          </span>
+          {% endif %}
+          {% if p.status in ('rejected', 'duplicate') and p.ai_skip_reason %}
+          <span class="badge bg-light text-danger border" title="{{ p.ai_skip_reason }}" style="cursor:help;max-width:120px;overflow:hidden;text-overflow:ellipsis">
+            <i class="bi bi-info-circle me-1"></i>AI
+          </span>
+          {% endif %}
+        </div>
+        <small class="text-muted text-nowrap">#{{ p.id }} · {{ p.source.title if p.source else '—' }}</small>
+      </div>
+
+      <p class="card-text text-dark" style="font-size:.88rem;line-height:1.5;max-height:110px;overflow:hidden">
+        {{ (p.original_text or '— нет текста —')[:280] }}{% if (p.original_text or '')|length > 280 %}…{% endif %}
+      </p>
+
+      {% if p.status in ('rejected', 'duplicate') and p.ai_skip_reason %}
+      <div class="text-danger" style="font-size:.78rem;line-height:1.4">
+        <i class="bi bi-robot me-1"></i>{{ p.ai_skip_reason[:120] }}{% if p.ai_skip_reason|length > 120 %}…{% endif %}
+      </div>
+      {% endif %}
+
+      <div class="text-muted mt-1" style="font-size:.75rem">
+        {{ p.published_at_source | localdt(display_tz) if p.published_at_source else '' }}
+      </div>
+    </div>
+
+    <div class="card-footer bg-transparent border-0 pt-0 d-flex flex-wrap gap-1">
+      <a class="btn btn-sm btn-outline-dark" href="/posts/{{ p.id }}">Открыть</a>
+      {% if p.status not in ('rejected', 'published') %}
+      <form method="post" action="/posts/{{ p.id }}/reject">
+        <button class="btn btn-sm btn-outline-warning">Отклонить</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/posts/{{ p.id }}/delete">
+        <button class="btn btn-sm btn-outline-danger">Удалить</button>
+      </form>
+    </div>
+
+    {% if p.status != 'published' and targets %}
+    <div class="card-footer bg-transparent border-top pt-1 pb-2">
+      <form method="post" action="/posts/{{ p.id }}/publish-raw" class="d-flex gap-1">
+        <select name="target_channel_id" class="form-select form-select-sm">
+          {% for t in targets %}<option value="{{ t.id }}">{{ t.title }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-sm btn-success text-nowrap">Отпр. как есть</button>
+      </form>
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+{% else %}
+<div class="col"><p class="text-muted">Постов не найдено.</p></div>
+{% endfor %}
+</div>
+
+{# Пагинация #}
+{% if total_pages > 1 %}
+{% set bqs = (base_qs + '&') if base_qs else '' %}
+<nav class="mt-4">
+  <ul class="pagination pagination-sm justify-content-center">
+    <li class="page-item {% if page <= 1 %}disabled{% endif %}">
+      <a class="page-link" href="?{{ bqs }}page={{ page - 1 }}">‹</a>
+    </li>
+    {% for p_num in range(1, total_pages + 1) %}
+      {% if p_num == page or p_num == 1 or p_num == total_pages or (p_num >= page - 2 and p_num <= page + 2) %}
+      <li class="page-item {% if p_num == page %}active{% endif %}">
+        <a class="page-link" href="?{{ bqs }}page={{ p_num }}">{{ p_num }}</a>
+      </li>
+      {% elif p_num == page - 3 or p_num == page + 3 %}
+      <li class="page-item disabled"><span class="page-link">…</span></li>
+      {% endif %}
+    {% endfor %}
+    <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
+      <a class="page-link" href="?{{ bqs }}page={{ page + 1 }}">›</a>
+    </li>
+  </ul>
+</nav>
+{% endif %}
+
+<script>
+const bulkBar = document.getElementById('bulk-bar');
+const countLabel = document.getElementById('selected-count');
+const hiddenIds = document.getElementById('bulk-hidden-ids');
+const selectAll = document.getElementById('select-all');
+
+function checkboxes() { return document.querySelectorAll('.post-checkbox'); }
+
+function updateBar() {
+  const checked = [...checkboxes()].filter(c => c.checked);
+  countLabel.textContent = checked.length + ' выбрано';
+  bulkBar.classList.toggle('d-none', checked.length === 0);
+  bulkBar.classList.toggle('d-flex', checked.length > 0);
+  hiddenIds.innerHTML = checked.map(c =>
+    `<input type="hidden" name="post_ids" value="${c.dataset.id}">`
+  ).join('');
+}
+
+selectAll.addEventListener('change', () => {
+  checkboxes().forEach(c => c.checked = selectAll.checked);
+  updateBar();
+});
+
+document.addEventListener('change', e => {
+  if (e.target.classList.contains('post-checkbox')) updateBar();
+});
+
+// Spinner on any generate/fetch submit
+document.querySelectorAll('form').forEach(form => {
+  form.addEventListener('submit', function(e) {
+    const btn = this.querySelector('button[type="submit"]') || this.querySelector('button:not([type])');
+    if (btn && (this.action.includes('generate') || this.action.includes('fetch'))) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>' + btn.textContent.trim();
+    }
+  });
+});
+</script>
+{% endblock %}

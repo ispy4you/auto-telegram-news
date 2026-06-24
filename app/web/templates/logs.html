@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-semibold mb-0">Логи <span class="text-muted fw-normal fs-6">({{ items|length }})</span></h4>
+</div>
+
+{# Фильтры #}
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-3">
+    <select class="form-select" name="action">
+      <option value="">Все события</option>
+      {% for a in all_actions %}
+      <option value="{{ a }}" {% if filters.action == a %}selected{% endif %}>{{ a }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" placeholder="Поиск по тексту сообщения" value="{{ filters.q }}">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary">Фильтр</button>
+    <a href="/logs" class="btn btn-outline-secondary">Сброс</a>
+  </div>
+</form>
+
+<div class="card">
+  <div class="card-body p-0">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3" style="width:140px">Время</th>
+          <th style="width:200px">Событие</th>
+          <th style="width:130px">Тип</th>
+          <th style="width:60px">ID</th>
+          <th>Сообщение</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in items %}
+        {% set icon_map = {
+          'fetch_post_telethon': ('bi-cloud-download', 'text-primary'),
+          'fetch_post_rss': ('bi-rss', 'text-warning'),
+          'publish_success': ('bi-check-circle-fill', 'text-success'),
+          'publish_failed': ('bi-x-circle-fill', 'text-danger'),
+          'publish_raw_error': ('bi-x-circle', 'text-danger'),
+          'fetch_error': ('bi-exclamation-triangle-fill', 'text-warning'),
+          'autopublish_error': ('bi-x-circle', 'text-danger'),
+          'auto_skip': ('bi-skip-forward', 'text-muted'),
+          'target_test': ('bi-broadcast', 'text-info'),
+          'scheduler_run': ('bi-arrow-repeat', 'text-primary'),
+          'media_cleanup': ('bi-trash', 'text-secondary'),
+          'media_skip': ('bi-image', 'text-muted'),
+          'post_delete': ('bi-trash', 'text-danger'),
+          'fetch_skip_garbage': ('bi-funnel', 'text-muted'),
+        } %}
+        {% set icon = icon_map.get(l.action, ('bi-dot', 'text-muted')) %}
+        <tr>
+          <td class="ps-3 text-muted small text-nowrap">{{ l.created_at | localdt(display_tz, '%d.%m %H:%M:%S') }}</td>
+          <td>
+            <span class="small">
+              <i class="bi {{ icon[0] }} {{ icon[1] }} me-1"></i>{{ l.action }}
+            </span>
+          </td>
+          <td class="text-muted small">{{ l.entity_type }}</td>
+          <td class="text-muted small">{{ l.entity_id }}</td>
+          <td class="small" style="max-width:400px;word-break:break-word">{{ l.message }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5" class="text-muted text-center py-4">Логов нет</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

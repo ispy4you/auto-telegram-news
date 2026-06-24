@@ -1,0 +1,31 @@
+# Секреты и конфиг окружения
+.env
+
+# База данных и данные
+data/app.db
+data/app.db-wal
+data/app.db-shm
+data/telegram_session/
+
+# Медиафайлы (могут быть большими)
+data/media/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+.python-version
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Тесты / покрытие
+.pytest_cache/
+.coverage
+htmlcov/

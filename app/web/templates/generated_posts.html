@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Generated Posts</h2>
+<table class="table table-sm">
+<tr><th>ID</th><th>RawPost</th><th>Status</th><th>Text</th><th>Actions</th></tr>
+{% for g in items %}
+<tr>
+<td>{{ g.id }}</td><td>{{ g.raw_post_id }}</td><td>{{ g.status }}</td><td>{{ (g.edited_text or g.generated_text or '')[:180] }}</td>
+<td>
+<a class="btn btn-sm btn-outline-dark" href="/posts/{{ g.raw_post_id }}">Edit</a>
+<form method="post" action="/generated/{{ g.id }}/reject" class="d-inline"><button class="btn btn-sm btn-outline-danger">Reject</button></form>
+</td>
+</tr>
+{% endfor %}
+</table>
+{% endblock %}

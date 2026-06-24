@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-semibold mb-0">Настройки</h4>
+</div>
+
+{% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
+<form method="post" action="/settings">
+<div class="row g-4">
+
+  {# Основные параметры #}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header bg-white fw-semibold">Основные параметры</div>
+      <div class="card-body">
+        <div class="row g-3">
+
+          <div class="col-md-4">
+            <label class="form-label">Порог дедупликации <span class="text-muted fw-normal">(%)</span></label>
+            <input class="form-control" name="duplicate_threshold" value="{{ cfg.get('duplicate_threshold', '88') }}">
+            {% if 'duplicate_threshold' not in cfg %}
+            <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Из .env: не задано, дефолт 88</div>
+            {% else %}
+            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Интервал сбора <span class="text-muted fw-normal">(сек)</span></label>
+            <input class="form-control" name="fetch_interval_seconds" value="{{ cfg.get('fetch_interval_seconds', env.fetch_interval_seconds) }}">
+            {% if 'fetch_interval_seconds' not in cfg %}
+            <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Из .env: {{ env.fetch_interval_seconds }}с</div>
+            {% else %}
+            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД (требует перезапуска)</div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Макс. размер медиа <span class="text-muted fw-normal">(МБ)</span></label>
+            <input class="form-control" name="max_media_mb" value="{{ cfg.get('max_media_mb', env.max_media_mb) }}">
+            {% if 'max_media_mb' not in cfg %}
+            <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Из .env: {{ env.max_media_mb }} МБ</div>
+            {% else %}
+            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">Часовой пояс</label>
+            <input class="form-control" name="display_timezone" value="{{ current_tz }}" placeholder="Europe/Moscow">
+            <div class="form-text text-muted">
+              Примеры: <code>Europe/Moscow</code>, <code>Asia/Novosibirsk</code>, <code>UTC</code>,
+              <code>Europe/Kaliningrad</code>
+            </div>
+            {% if 'display_timezone' not in cfg %}
+            <div class="form-text text-muted mt-1"><i class="bi bi-box me-1"></i>Дефолт: Europe/Moscow</div>
+            {% else %}
+            <div class="form-text text-success mt-1"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+            {% endif %}
+          </div>
+
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="global_auto_publish_enabled" id="auto-pub"
+                {% if cfg.get('global_auto_publish_enabled') == 'true' %}checked{% endif %}>
+              <label class="form-check-label" for="auto-pub">Глобальная автопубликация</label>
+            </div>
+            <div class="form-text text-muted">Если выключено — автопубликация не работает даже для каналов с режимом «авто»</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# AI промпты #}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header bg-white fw-semibold">AI промпты</div>
+      <div class="card-body">
+        <div class="mb-3">
+          <label class="form-label">Системный промпт</label>
+          <textarea class="form-control font-monospace" name="ai_system_prompt" rows="8" style="font-size:.85rem">{{ cfg.get('ai_system_prompt', default_system_prompt) }}</textarea>
+          {% if 'ai_system_prompt' not in cfg %}
+          <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Используется дефолтный промпт из кода</div>
+          {% else %}
+          <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+          {% endif %}
+        </div>
+        <div>
+          <label class="form-label">Шаблон пользовательского промпта</label>
+          <p class="text-muted small mb-1">Плейсхолдеры: <code>{source_title}</code> <code>{published_at_source}</code> <code>{original_text}</code> <code>{has_media}</code></p>
+          <textarea class="form-control font-monospace" name="ai_prompt_template" rows="14" style="font-size:.85rem">{{ cfg.get('ai_prompt_template', default_user_prompt) }}</textarea>
+          {% if 'ai_prompt_template' not in cfg %}
+          <div class="form-text text-muted"><i class="bi bi-box me-1"></i>Используется дефолтный шаблон из кода</div>
+          {% else %}
+          <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12">
+    <button class="btn btn-primary"><i class="bi bi-floppy me-1"></i>Сохранить настройки</button>
+  </div>
+
+</div>
+</form>
+
+{# Медиафайлы — очистка #}
+<div class="card mt-4">
+  <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+    <span>Медиафайлы</span>
+    <span class="text-muted fw-normal small">Занято на диске: <strong>{{ media_size_mb }} МБ</strong></span>
+  </div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">Удаляет медиафайлы и записи о них из БД, если они старше указанного количества дней. Сами посты не удаляются.</p>
+    <form method="post" action="/settings/cleanup-media" class="d-flex gap-2 align-items-center">
+      <label class="text-nowrap small mb-0">Удалить медиа старше</label>
+      <input type="number" class="form-control form-control-sm" name="days" value="30" min="1" style="width:80px">
+      <label class="small mb-0">дней</label>
+      <button class="btn btn-sm btn-outline-danger" onclick="return confirm('Удалить медиафайлы?')">
+        <i class="bi bi-trash me-1"></i>Очистить
+      </button>
+    </form>
+  </div>
+</div>
+
+{# Секреты из .env (только для справки) #}
+<div class="card mt-3">
+  <div class="card-header bg-white fw-semibold">Конфигурация из .env <span class="text-muted fw-normal small">(только чтение)</span></div>
+  <div class="card-body">
+    <div class="row g-2" style="font-size:.85rem">
+      <div class="col-md-6">
+        <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+          <span class="text-muted">TELEGRAM_API_ID</span>
+          <span class="font-monospace">{{ '✓ задан' if env.telegram_api_id else '✗ не задан' }}</span>
+        </div>
+        <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+          <span class="text-muted">TELEGRAM_API_HASH</span>
+          <span class="font-monospace">{{ '✓ задан' if env.telegram_api_hash else '✗ не задан' }}</span>
+        </div>
+        <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+          <span class="text-muted">TELEGRAM_BOT_TOKEN</span>
+          <span class="font-monospace">{{ '✓ задан' if env.telegram_bot_token else '✗ не задан' }}</span>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+          <span class="text-muted">AI Gateway API Key</span>
+          <span class="font-monospace">{{ '✓ задан' if env.timeweb_ai_gateway_api_key else '✗ не задан' }}</span>
+        </div>
+        <div class="d-flex justify-content-between border-bottom pb-1 mb-1">
+          <span class="text-muted">AI Model</span>
+          <span class="font-monospace">{{ env.timeweb_ai_gateway_model or '—' }}</span>
+        </div>
+        <div class="d-flex justify-content-between pb-1">
+          <span class="text-muted">Admin Auth</span>
+          <span class="font-monospace">{{ 'включена' if env.admin_auth_enabled else 'выключена' }}</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

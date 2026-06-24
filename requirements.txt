@@ -1,0 +1,16 @@
+fastapi
+uvicorn[standard]
+jinja2
+python-multipart
+sqlalchemy>=2.0
+pydantic-settings
+python-dotenv
+telethon
+qrcode
+aiogram>=3.0
+apscheduler
+httpx
+rapidfuzz
+pytest
+feedparser
+itsdangerous

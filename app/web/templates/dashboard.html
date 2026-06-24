@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="mb-0 fw-semibold">Дашборд</h4>
+  <form method="post" action="/fetch-now">
+    <button class="btn btn-success btn-sm"><i class="bi bi-arrow-clockwise me-1"></i>Собрать сейчас</button>
+  </form>
+</div>
+
+{# Метрики — строка 1: сбор #}
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3">
+      <div class="fs-2 fw-bold text-primary">{{ stats.fetched_today }}</div>
+      <div class="text-muted small">Собрано сегодня</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3">
+      <div class="fs-2 fw-bold text-secondary">{{ stats.fetched_week }}</div>
+      <div class="text-muted small">За 7 дней</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3">
+      <div class="fs-2 fw-bold text-success">{{ stats.published_today }}</div>
+      <div class="text-muted small">Опубликовано сегодня</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3">
+      <div class="fs-2 fw-bold text-success">{{ stats.published_week }}</div>
+      <div class="text-muted small">Опубл. за 7 дней</div>
+    </div>
+  </div>
+</div>
+
+{# Метрики — строка 2: статусы #}
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3 border-primary border-top border-3">
+      <div class="fs-2 fw-bold text-primary">{{ stats.new_posts }}</div>
+      <div class="text-muted small">Ожидают обработки</div>
+      {% if stats.new_posts %}
+      <a href="/posts?status=new" class="stretched-link"></a>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3 border-warning border-top border-3">
+      <div class="fs-2 fw-bold text-warning">{{ stats.drafts }}</div>
+      <div class="text-muted small">Черновиков</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3 border-danger border-top border-3">
+      <div class="fs-2 fw-bold text-danger">{{ stats.rejected_total }}</div>
+      <div class="text-muted small">Отклонено всего</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3">
+      <div class="fs-2 fw-bold">{{ stats.sources_active }}<span class="text-muted fs-5">/{{ stats.sources_total }}</span></div>
+      <div class="text-muted small">Источников активно</div>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  {# Очередь на обработку #}
+  <div class="col-lg-7">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center bg-white">
+        <span class="fw-semibold">Ожидают обработки</span>
+        <a href="/posts?status=new" class="btn btn-sm btn-outline-primary">Все посты</a>
+      </div>
+      <div class="card-body p-0">
+        {% if pending_posts %}
+        <div class="list-group list-group-flush">
+          {% for p in pending_posts %}
+          <div class="list-group-item py-2 px-3">
+            <div class="d-flex justify-content-between align-items-start gap-2">
+              <div style="min-width:0">
+                <div class="small text-muted mb-1">{{ p.source.title if p.source else '—' }} · {{ p.published_at_source | localdt(display_tz, '%d.%m %H:%M') if p.published_at_source else '' }}</div>
+                <div class="text-truncate" style="font-size:.88rem">{{ (p.original_text or '— нет текста —')[:120] }}</div>
+              </div>
+              <div class="d-flex gap-1 flex-shrink-0">
+                <a href="/posts/{{ p.id }}" class="btn btn-sm btn-outline-dark">Открыть</a>
+                {% if targets %}
+                <form method="post" action="/posts/{{ p.id }}/publish-raw">
+                  <input type="hidden" name="target_channel_id" value="{{ targets[0].id }}">
+                  <button class="btn btn-sm btn-success">Отпр.</button>
+                </form>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="p-4 text-muted text-center">Нет постов в очереди</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Последние события #}
+  <div class="col-lg-5">
+    <div class="card h-100">
+      <div class="card-header d-flex justify-content-between align-items-center bg-white">
+        <span class="fw-semibold">Последние события</span>
+        <a href="/logs" class="btn btn-sm btn-outline-secondary">Все логи</a>
+      </div>
+      <div class="card-body p-0">
+        <div class="list-group list-group-flush">
+          {% for log in recent_logs %}
+          {% set icon = {
+            'scheduler_run': ('bi-arrow-repeat', 'text-primary'),
+            'fetch_post_telethon': ('bi-cloud-download', 'text-primary'),
+            'fetch_post_rss': ('bi-rss', 'text-warning'),
+            'publish_success': ('bi-check-circle', 'text-success'),
+            'publish_failed': ('bi-x-circle', 'text-danger'),
+            'fetch_error': ('bi-exclamation-triangle', 'text-warning'),
+            'autopublish_error': ('bi-x-circle', 'text-danger'),
+            'target_test': ('bi-broadcast', 'text-info'),
+          }.get(log.action, ('bi-dot', 'text-muted')) %}
+          <div class="list-group-item py-2 px-3">
+            <div class="d-flex align-items-start gap-2">
+              <i class="bi {{ icon[0] }} {{ icon[1] }} mt-1 flex-shrink-0"></i>
+              <div style="min-width:0">
+                <div class="text-truncate" style="font-size:.82rem">{{ log.message[:80] }}</div>
+                <div class="text-muted" style="font-size:.72rem">{{ log.created_at | localdt(display_tz, '%d.%m %H:%M:%S') }}</div>
+              </div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
