@@ -75,6 +75,9 @@ class SchedulerService:
                     finally:
                         self.is_running = False
 
+    async def trigger_run(self):
+        await self._safe_run()
+
     def update_interval(self, seconds: int):
         self.interval_seconds = seconds
         self.scheduler.reschedule_job(_JOB_ID, trigger="interval", seconds=seconds)

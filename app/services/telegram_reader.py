@@ -22,18 +22,48 @@ class TelegramReaderService:
         self.settings = get_settings()
         self.media_storage = MediaStorageService()
 
+    def _build_proxy(self):
+        """Returns proxy tuple for Telethon, or None if not configured."""
+        ptype = self.settings.telegram_proxy_type.lower().strip()
+        if not ptype or not self.settings.telegram_proxy_host:
+            return None, None
+
+        host = self.settings.telegram_proxy_host
+        port = self.settings.telegram_proxy_port
+
+        if ptype == "mtproxy":
+            from telethon.network import ConnectionTcpMTProxyRandomizedIntermediate
+            secret = self.settings.telegram_proxy_secret
+            return (host, port, secret), ConnectionTcpMTProxyRandomizedIntermediate
+
+        import socks
+        socks_type = socks.SOCKS5 if ptype == "socks5" else socks.HTTP
+        if self.settings.telegram_proxy_username:
+            return (socks_type, host, port, True,
+                    self.settings.telegram_proxy_username,
+                    self.settings.telegram_proxy_password), None
+        return (socks_type, host, port), None
+
     def _client(self) -> TelegramClient:
         if not self.settings.telegram_api_id or not self.settings.telegram_api_hash:
             raise RuntimeError("TELEGRAM_API_ID и TELEGRAM_API_HASH не заданы в .env")
 
         Path(self.settings.telegram_session_path).parent.mkdir(parents=True, exist_ok=True)
+        proxy, connection = self._build_proxy()
+        kwargs = dict(
+            connection_retries=0,
+            retry_delay=0,
+            timeout=10,
+        )
+        if proxy:
+            kwargs["proxy"] = proxy
+        if connection:
+            kwargs["connection"] = connection
         return TelegramClient(
             self.settings.telegram_session_path,
             self.settings.telegram_api_id,
             self.settings.telegram_api_hash,
-            connection_retries=1,
-            retry_delay=1,
-            timeout=15,
+            **kwargs,
         )
 
     @staticmethod

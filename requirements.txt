@@ -12,5 +12,5 @@ apscheduler
 httpx
 rapidfuzz
 pytest
-feedparser
 itsdangerous
+PySocks>=1.7.1

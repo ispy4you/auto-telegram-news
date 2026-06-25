@@ -14,24 +14,13 @@
   <div class="card-body">
     <form method="post" action="/sources" class="row g-2 align-items-end">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div class="col-md-2">
-        <label class="form-label small text-muted mb-1">Тип</label>
-        <select class="form-select" name="source_type" id="src-type" onchange="toggleRssField()">
-          <option value="telethon">Telegram (Telethon)</option>
-          <option value="rss">RSS</option>
-        </select>
-      </div>
       <div class="col-md-3">
         <label class="form-label small text-muted mb-1">Название</label>
         <input class="form-control" name="title" placeholder="Например: РБК" required>
       </div>
-      <div class="col-md-3" id="tg-field">
+      <div class="col-md-5">
         <label class="form-label small text-muted mb-1">Telegram-канал</label>
-        <input class="form-control" name="username_or_url" placeholder="@channel или https://t.me/channel">
-      </div>
-      <div class="col-md-3 d-none" id="rss-field">
-        <label class="form-label small text-muted mb-1">RSS URL</label>
-        <input class="form-control" name="rss_url" placeholder="https://example.com/rss.xml">
+        <input class="form-control" name="username_or_url" placeholder="@channel или https://t.me/channel" required>
       </div>
       <div class="col-auto">
         <button class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
@@ -47,7 +36,6 @@
       <thead class="table-light">
         <tr>
           <th class="ps-3">Источник</th>
-          <th>Тип</th>
           <th>Статус</th>
           <th class="text-end">Собрано</th>
           <th class="text-end">Опубликовано</th>
@@ -61,19 +49,8 @@
           <td class="ps-3">
             <div class="fw-semibold">{{ s.title }}</div>
             <div class="text-muted small">
-              {% if s.source_type == 'rss' %}
-                <a href="{{ s.rss_url }}" target="_blank" class="text-muted text-decoration-none">{{ s.rss_url[:50] }}{% if s.rss_url|length > 50 %}…{% endif %}</a>
-              {% else %}
-                <a href="https://t.me/{{ s.username }}" target="_blank" class="text-muted text-decoration-none">@{{ s.username }}</a>
-              {% endif %}
+              <a href="https://t.me/{{ s.username }}" target="_blank" class="text-muted text-decoration-none">@{{ s.username }}</a>
             </div>
-          </td>
-          <td>
-            {% if s.source_type == 'rss' %}
-              <span class="badge bg-warning text-dark"><i class="bi bi-rss me-1"></i>RSS</span>
-            {% else %}
-              <span class="badge bg-primary"><i class="bi bi-telegram me-1"></i>Telethon</span>
-            {% endif %}
           </td>
           <td>
             {% if s.enabled %}
@@ -111,18 +88,10 @@
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="7" class="text-muted text-center py-4">Источников нет</td></tr>
+        <tr><td colspan="6" class="text-muted text-center py-4">Источников нет</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
-
-<script>
-function toggleRssField() {
-  const t = document.getElementById('src-type').value;
-  document.getElementById('tg-field').classList.toggle('d-none', t === 'rss');
-  document.getElementById('rss-field').classList.toggle('d-none', t !== 'rss');
-}
-</script>
 {% endblock %}

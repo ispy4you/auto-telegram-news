@@ -50,7 +50,7 @@ class SourceChannel(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(255))
     username: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
-    source_type: Mapped[str] = mapped_column(String(32), default="rss")
+    source_type: Mapped[str] = mapped_column(String(32), default="telethon")
     rss_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     telegram_channel_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     url: Mapped[str] = mapped_column(String(512))

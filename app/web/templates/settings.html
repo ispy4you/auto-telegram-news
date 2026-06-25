@@ -130,6 +130,39 @@
   </div>
 </div>
 
+{# Прокси для Telethon #}
+<div class="card mt-3">
+  <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+    <span>Прокси для Telegram (Telethon)</span>
+    {% if env.telegram_proxy_type %}
+    <span class="badge bg-success">{{ env.telegram_proxy_type | upper }} {{ env.telegram_proxy_host }}:{{ env.telegram_proxy_port }}</span>
+    {% else %}
+    <span class="badge bg-secondary">не задан</span>
+    {% endif %}
+  </div>
+  <div class="card-body" style="font-size:.88rem">
+    <p class="text-muted mb-2">Если Telegram недоступен напрямую — настройте прокси в <code>.env</code>. Перезапустите сервер после изменений.</p>
+    <div class="row g-2">
+      <div class="col-12">
+        <div class="p-2 bg-light rounded font-monospace" style="font-size:.8rem;line-height:1.9">
+          # SOCKS5 прокси:<br>
+          TELEGRAM_PROXY_TYPE=socks5<br>
+          TELEGRAM_PROXY_HOST=127.0.0.1<br>
+          TELEGRAM_PROXY_PORT=1080<br>
+          TELEGRAM_PROXY_USERNAME=user  <span class="text-muted"># необязательно</span><br>
+          TELEGRAM_PROXY_PASSWORD=pass  <span class="text-muted"># необязательно</span><br>
+          <br>
+          # MTProxy (Telegram-специфичный):<br>
+          TELEGRAM_PROXY_TYPE=mtproxy<br>
+          TELEGRAM_PROXY_HOST=proxy.example.com<br>
+          TELEGRAM_PROXY_PORT=443<br>
+          TELEGRAM_PROXY_SECRET=abc123...
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {# Секреты из .env (только для справки) #}
 <div class="card mt-3">
   <div class="card-header bg-white fw-semibold">Конфигурация из .env <span class="text-muted fw-normal small">(только чтение)</span></div>

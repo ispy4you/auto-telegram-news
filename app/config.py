@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     source_provider: str = "telethon"
     telegram_bot_token: str | None = None
 
+    # Proxy for Telethon: type = socks5 | http | mtproxy | "" (disabled)
+    telegram_proxy_type: str = ""
+    telegram_proxy_host: str = ""
+    telegram_proxy_port: int = 0
+    telegram_proxy_username: str = ""
+    telegram_proxy_password: str = ""
+    telegram_proxy_secret: str = ""  # MTProxy only
+
     timeweb_ai_gateway_api_key: str | None = None
     timeweb_ai_gateway_base_url: str | None = None
     timeweb_ai_gateway_model: str | None = None

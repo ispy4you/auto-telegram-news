@@ -12,9 +12,20 @@ from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob
 class TelegramPublisherService:
     def __init__(self):
         self.settings = get_settings()
+        self._bot: Bot | None = None
+
+    def _get_bot(self) -> Bot:
+        if self._bot is None:
+            self._bot = Bot(self.settings.telegram_bot_token)
+        return self._bot
+
+    async def close(self):
+        if self._bot is not None:
+            await self._bot.session.close()
+            self._bot = None
 
     async def test_target(self, chat_id: str) -> tuple[bool, str]:
-        bot = Bot(self.settings.telegram_bot_token)
+        bot = self._get_bot()
         try:
             me = await bot.get_me()
             member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
@@ -22,10 +33,8 @@ class TelegramPublisherService:
             return ok, str(member.status)
         except Exception as exc:
             return False, str(exc)
-        finally:
-            await bot.session.close()
 
-    async def publish_generated_post(self, db: Session, generated_post_id: int, target_channel_id: int, publish_text_only_on_missing_media: bool = True):
+    async def publish_generated_post(self, db: Session, generated_post_id: int, target_channel_id: int, publish_text_only_on_missing_media: bool = True, include_media: bool = True):
         generated = db.get(GeneratedPost, generated_post_id)
         target = db.get(TargetChannel, target_channel_id)
         if not generated or not target:
@@ -39,16 +48,16 @@ class TelegramPublisherService:
         if not raw_post:
             raise ValueError(f"RawPost not found for GeneratedPost {generated_post_id}")
 
-        bot = Bot(self.settings.telegram_bot_token)
+        bot = self._get_bot()
         job = PublishJob(generated_post_id=generated_post_id, target_channel_id=target_channel_id, status=PublishJobStatus.RUNNING.value, attempts=1)
         db.add(job)
         db.flush()
 
         try:
             media = sorted(raw_post.media_items, key=lambda m: m.sort_order)
-            existing_media = [m for m in media if Path(m.file_path).exists()]
+            existing_media = [m for m in media if Path(m.file_path).exists()] if include_media else []
 
-            if media and not existing_media and not publish_text_only_on_missing_media:
+            if include_media and media and not existing_media and not publish_text_only_on_missing_media:
                 raise FileNotFoundError("All media files missing")
 
             if not existing_media:
@@ -92,5 +101,3 @@ class TelegramPublisherService:
             db.add(ActionLog(action="publish_failed", entity_type="GeneratedPost", entity_id=str(generated.id), message=str(exc)))
             db.commit()
             raise
-        finally:
-            await bot.session.close()
