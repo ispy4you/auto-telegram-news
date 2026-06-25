@@ -1,102 +1,212 @@
-# Telegram News Bot MVP (FastAPI + SQLite)
+# Telegram News Bot MVP
 
-Production-ready MVP для мониторинга публичных Telegram-каналов через Telethon user session, генерации новостей через Timeweb AI Gateway и публикации в целевые Telegram-каналы через Telegram Bot API (aiogram).
+Production-ready MVP для мониторинга публичных Telegram-каналов через Telethon user session, генерации новостных постов через Timeweb AI Gateway и публикации в целевые Telegram-каналы через Telegram Bot API (aiogram).
+
+## Возможности
+
+### Сбор контента
+- Читает посты из любого числа публичных Telegram-каналов через **Telethon user session** — без необходимости быть администратором источника
+- Поддержка **RSS/Atom**-каналов как альтернативного типа источника
+- Инкрементальный сбор: запоминает последнее прочитанное сообщение, не тянет одно и то же дважды
+- Настраиваемый интервал фонового сбора (30 с — 24 ч, по умолчанию 120 с)
+- Скачивает и сохраняет вложения: фото, видео, документы
+
+### Дедупликация
+- Нечёткий поиск дублей через **rapidfuzz** с настраиваемым порогом сходства (50–100%, по умолчанию 88%)
+- SHA-256 для мгновенного обнаружения точных копий
+- Нормализация текста перед сравнением: убирает ссылки, пунктуацию, лишние пробелы
+- Окно проверки — 48 часов
+
+### AI-генерация
+- Интеграция с **Timeweb AI Gateway** (OpenAI-совместимый endpoint)
+- Системный промпт и пользовательский шаблон хранятся в базе и редактируются прямо в админке
+- Настраиваемые температура, лимит токенов, таймаут
+- Автоматическая оценка поста: SUITABLE / REJECTED
+- Корректная обработка обрезанного JSON-ответа
+
+### Управление постами
+- Статусная машина: `NEW → READY → GENERATED → PUBLISHED`
+- Массовые операции: сгенерировать, отклонить, удалить несколько постов за раз
+- Ручное редактирование AI-текста перед публикацией
+- Публикация оригинального текста без AI-обработки
+- Повторная генерация для уже обработанных постов
+
+### Публикация
+- Отправка в несколько целевых каналов через **aiogram 3.x**
+- Умная работа с медиа:
+  - одиночный файл — отправляется с подписью
+  - несколько файлов — media group, текст на первом
+  - длинный текст — отдельным сообщением после медиа
+- Переключатель «отправить с медиа / без» при каждой публикации
+- Маршруты: задаёте, какой источник идёт в какой канал; если маршрутов нет — посты рассылаются во все активные каналы
+- Автопубликация: полностью автоматический пайплайн без участия оператора
+- Отслеживание заданий публикации с повторными попытками (до 3)
+
+### Веб-интерфейс и дашборд
+- Сводка: активные источники, новые посты, дубли, черновики, опубликовано сегодня/за неделю
+- Статус планировщика: интервал, следующий запуск, кнопка «запустить сейчас»
+- Лог последних действий на главной странице
+
+### Логирование и аудит
+- Полная история всех действий пользователя и системных событий
+- Фильтрация по типу события и тексту
+- Постраничный вывод (100 записей на страницу)
+
+### Настройки
+- Порог дедупликации, интервал сбора, лимит медиа на диске (1–500 МБ)
+- Часовой пояс отображения (по умолчанию Europe/Moscow)
+- Глобальный переключатель автопубликации
+- Кастомные промпты для AI — прямо в UI, без редактирования файлов
+
+### Безопасность
+- Сессионная аутентификация с HMAC-сравнением в constant time
+- CSRF-защита на всех формах: double-submit token + сессионное хранилище
+- Медиафайлы отдаются через авторизованный маршрут `/media/`, не как публичная статика
+- В production-режиме запуск блокируется, если не заменены дефолтные секреты
+
+---
 
 ## Стек
 
-- Python 3.12+
-- FastAPI + Jinja2 + Bootstrap 5
-- SQLite + SQLAlchemy 2.x
-- Telethon (чтение источников)
-- RSS/Atom (опциональный fallback)
-- aiogram 3.x (публикация)
-- APScheduler (фоновый сбор)
-- httpx (AI gateway)
-- rapidfuzz (дедупликация)
+| Слой | Библиотеки |
+|---|---|
+| Web | FastAPI, Uvicorn, Jinja2, Bootstrap 5 |
+| База данных | SQLite (WAL), SQLAlchemy 2.x |
+| Telegram (чтение) | Telethon |
+| Telegram (публикация) | aiogram 3.x |
+| AI | httpx + OpenAI-compatible endpoint |
+| Дедупликация | rapidfuzz |
+| Планировщик | APScheduler |
+| Безопасность | itsdangerous (CSRF) |
+| Прокси | PySocks (SOCKS5 / HTTP / MTProxy) |
 
-## Установка на macOS
+---
+
+## Установка
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
-## Получение TELEGRAM_API_ID и TELEGRAM_API_HASH
+### Получение TELEGRAM_API_ID и TELEGRAM_API_HASH
 
 1. Перейдите на [my.telegram.org](https://my.telegram.org).
 2. Войдите в аккаунт.
 3. Создайте приложение в разделе API development tools.
 4. Скопируйте `api_id` и `api_hash` в `.env`.
 
-## Создание user session (Telethon)
+### Создание user session (Telethon)
 
 ```bash
 python -m app.cli.init_telegram_session
 ```
 
-Команда интерактивно запросит phone/code/password (если включен 2FA) и сохранит сессию в `TELEGRAM_SESSION_PATH`.
+Команда интерактивно запросит phone/code/password (если включён 2FA) и сохранит сессию в `TELEGRAM_SESSION_PATH`.
 
-## Создание бота через BotFather
+### Создание бота через BotFather
 
 1. Напишите `@BotFather`.
 2. Выполните `/newbot`.
 3. Получите токен и добавьте в `.env` как `TELEGRAM_BOT_TOKEN`.
 
-## Добавление бота админом в целевой канал
+### Добавление бота в целевой канал
 
-1. Откройте настройки канала.
-2. Добавьте бота в администраторы.
-3. Выдайте права на публикацию.
-4. В админке нажмите `Test` у target channel.
+1. Откройте настройки канала → Администраторы.
+2. Добавьте бота, выдайте право на публикацию.
+3. В админке нажмите `Test` у нужного target channel.
 
-## Запуск локально
+---
+
+## Конфигурация `.env`
+
+```dotenv
+# Приложение
+APP_ENV=local                        # local | production
+APP_HOST=127.0.0.1
+APP_PORT=8000
+APP_SECRET_KEY=change-me             # обязательно сменить в production
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=change-me             # обязательно сменить в production
+ADMIN_AUTH_ENABLED=true
+
+# База данных
+DATABASE_URL=sqlite:///./data/app.db
+
+# Telegram
+TELEGRAM_API_ID=
+TELEGRAM_API_HASH=
+TELEGRAM_SESSION_PATH=./data/telegram_session/user.session
+TELEGRAM_BOT_TOKEN=
+
+# Прокси (опционально)
+TELEGRAM_PROXY_TYPE=                 # socks5 | http | mtproxy | ""
+TELEGRAM_PROXY_HOST=
+TELEGRAM_PROXY_PORT=
+TELEGRAM_PROXY_USERNAME=
+TELEGRAM_PROXY_PASSWORD=
+TELEGRAM_PROXY_SECRET=               # только для MTProxy
+
+# AI Gateway
+TIMEWEB_AI_GATEWAY_API_KEY=
+TIMEWEB_AI_GATEWAY_BASE_URL=
+TIMEWEB_AI_GATEWAY_MODEL=
+AI_TEMPERATURE=0.4
+AI_MAX_TOKENS=1600
+AI_TIMEOUT_SECONDS=60
+
+# Пайплайн
+FETCH_INTERVAL_SECONDS=120
+DEFAULT_LOOKBACK_LIMIT=50
+MAX_MEDIA_MB=50
+AUTO_PUBLISH_ENABLED=false
+DEFAULT_POST_MODE=manual
+```
+
+---
+
+## Запуск
+
+### Локально
 
 ```bash
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-## Запуск на VPS Ubuntu
+### VPS Ubuntu (production)
 
 1. Установите Python 3.12+, venv, git.
-2. Разверните проект и `.env`.
-3. Создайте Telethon session через `python -m app.cli.init_telegram_session`.
-4. Запускайте через systemd/pm2/supervisor.
-5. Открывайте админку через SSH tunnel или reverse proxy с HTTPS и auth.
+2. Разверните проект и заполните `.env` с `APP_ENV=production`.
+3. Создайте Telethon-сессию: `python -m app.cli.init_telegram_session`.
+4. Запустите через systemd / PM2 / supervisor.
+5. Откройте админку через SSH-туннель или reverse proxy (nginx) с HTTPS и basic auth.
 
-## Настройка Timeweb AI Gateway
-
-Заполните в `.env`:
-
-- `TIMEWEB_AI_GATEWAY_API_KEY`
-- `TIMEWEB_AI_GATEWAY_BASE_URL`
-- `TIMEWEB_AI_GATEWAY_MODEL`
-- `AI_TEMPERATURE`
-- `AI_MAX_TOKENS`
-- `AI_TIMEOUT_SECONDS`
-
-Клиент использует OpenAI-compatible endpoint `.../chat/completions`.
+---
 
 ## Работа в админке
 
-1. Добавьте source channels (`/sources`) по `@username` или `https://t.me/...` (тип `telethon`).
-2. Добавьте target channels (`/targets`) с `chat_id`.
-3. Нажмите `Запустить сбор сейчас` на dashboard или `/posts`.
-4. Проверяйте посты в `/posts`, запускайте генерацию AI.
-5. Редактируйте текст и публикуйте в нужный target.
+1. **Sources** → добавьте каналы-источники по `@username` или `https://t.me/...` (тип `telethon` или `rss`).
+2. **Targets** → добавьте целевые каналы с `chat_id`, проверьте кнопкой `Test`.
+3. **Routes** → настройте маршруты: какой источник идёт в какой канал.
+4. **Dashboard** → нажмите «Запустить сбор сейчас» или дождитесь автоматического запуска.
+5. **Posts** → просматривайте новые посты, запускайте AI-генерацию, редактируйте и публикуйте.
+6. **Settings** → подстройте пороги дедупликации, промпты, интервал сбора.
 
-RSS-источники по-прежнему поддерживаются как опциональный тип `rss` в `/sources`.
+---
 
 ## Ограничения
 
-- Telegram Bot API имеет лимиты на размер файлов.
-- Caption media ограничен (~1024 символа), длинный текст отправляется отдельным сообщением.
-- Источники читаются через user session Telethon; бот не админ в источниках.
+- Telegram Bot API ограничивает размер файлов при отправке.
+- Caption к медиа ограничен ~1024 символами; длинный текст отправляется отдельным сообщением.
+- Источники читаются через user session — бот не должен быть администратором источника.
 - Публичные каналы должны быть доступны аккаунту user session.
-- Автопубликацию включайте осторожно.
+- Автопубликацию включайте осторожно: нет дополнительного ревью перед отправкой.
 
-## Базовая проверка
+---
+
+## Тесты
 
 ```bash
 pytest
