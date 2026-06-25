@@ -23,7 +23,12 @@ class NewsPipelineService:
             try:
                 await self.reader.fetch_source(db, source, self.settings.default_lookback_limit)
             except Exception as exc:
-                db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=str(exc)))
+                msg = str(exc)
+                if "Constructor ID" in msg and "TLObject" in msg:
+                    msg = "Telethon: схема TL устарела (Telegram обновил API). Обновите библиотеку."
+                elif len(msg) > 500:
+                    msg = msg[:500] + "… [truncated]"
+                db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
                 db.commit()
 
     async def process_ready_posts(self, db: Session):
@@ -45,7 +50,9 @@ class NewsPipelineService:
         return db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
 
     async def run_autopublish(self, db: Session):
-        if not self.settings.auto_publish_enabled:
+        from app.models import AppSetting
+        setting = db.get(AppSetting, "global_auto_publish_enabled")
+        if not setting or setting.value != "true":
             return
 
         posts = db.scalars(select(RawPost).where(RawPost.status == RawPostStatus.READY.value)).all()

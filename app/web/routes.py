@@ -255,6 +255,26 @@ def toggle_target(target_id: int, db: Session = Depends(get_db), _: bool = Depen
     return RedirectResponse(url="/targets", status_code=302)
 
 
+@router.post("/targets/{target_id}/toggle-mode")
+def toggle_target_mode(target_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    target = db.get(TargetChannel, target_id)
+    if target:
+        if target.default_mode == "auto":
+            target.default_mode = "manual"
+            target.auto_publish_enabled = False
+        else:
+            target.default_mode = "auto"
+            target.auto_publish_enabled = True
+        db.add(ActionLog(
+            action="target_mode_change",
+            entity_type="TargetChannel",
+            entity_id=str(target.id),
+            message=f"Режим канала «{target.title}» изменён на «{target.default_mode}»",
+        ))
+        db.commit()
+    return RedirectResponse(url="/targets", status_code=302)
+
+
 @router.post("/targets/{target_id}/delete")
 def delete_target(target_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     target = db.get(TargetChannel, target_id)

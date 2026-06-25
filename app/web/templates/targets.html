@@ -71,11 +71,18 @@
           </td>
           <td class="text-muted small font-monospace">{{ t.chat_id }}</td>
           <td>
-            {% if t.default_mode == 'auto' %}
-              <span class="badge bg-info text-dark">Авто</span>
-            {% else %}
-              <span class="badge bg-light text-dark border">Ручной</span>
-            {% endif %}
+            <form method="post" action="/targets/{{ t.id }}/toggle-mode" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              {% if t.default_mode == 'auto' %}
+                <button type="submit" class="btn btn-sm btn-info text-dark border-0 px-2 py-1" title="Переключить в ручной режим">
+                  <i class="bi bi-robot me-1"></i>Авто
+                </button>
+              {% else %}
+                <button type="submit" class="btn btn-sm btn-outline-secondary px-2 py-1" title="Переключить в авторежим">
+                  <i class="bi bi-hand-index me-1"></i>Ручной
+                </button>
+              {% endif %}
+            </form>
           </td>
           <td>
             {% if t.auto_publish_enabled %}
