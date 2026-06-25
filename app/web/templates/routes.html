@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-semibold mb-0">Маршруты</h4>
+</div>
+
+{% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
+<div class="alert alert-info py-2 mb-4" style="font-size:.875rem">
+  <i class="bi bi-info-circle me-1"></i>
+  Если для источника не задан ни один маршрут — его посты идут во <strong>все</strong> активные каналы.
+  Как только добавляете хотя бы один маршрут — посты идут <strong>только</strong> в указанные каналы.
+</div>
+
+{% if not targets %}
+  <div class="card"><div class="card-body text-muted text-center py-5">Каналов публикации нет. <a href="/targets">Добавьте канал</a>.</div></div>
+{% elif not sources %}
+  <div class="card"><div class="card-body text-muted text-center py-5">Источников нет. <a href="/sources">Добавьте источник</a>.</div></div>
+{% else %}
+
+<div class="row g-3">
+  {% for target in targets %}
+  {% set target_routed = [] %}
+  {% for s in sources %}{% if (s.id, target.id) in routed %}{% set _ = target_routed.append(s.id) %}{% endif %}{% endfor %}
+
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header bg-white d-flex align-items-center justify-content-between py-2">
+        <div>
+          <span class="fw-semibold">{{ target.title }}</span>
+          {% if target.username %}<span class="text-muted small ms-2">@{{ target.username }}</span>{% endif %}
+          {% if target.default_mode == 'auto' %}
+            <span class="badge bg-info text-dark ms-2" style="font-size:.7rem">Авто</span>
+          {% else %}
+            <span class="badge bg-light text-dark border ms-2" style="font-size:.7rem">Ручной</span>
+          {% endif %}
+          {% if not target.enabled %}
+            <span class="badge bg-secondary ms-1" style="font-size:.7rem">Отключён</span>
+          {% endif %}
+        </div>
+        <span class="text-muted small">
+          {% if target_routed|length == 0 %}
+            <i class="bi bi-exclamation-circle me-1 text-warning"></i>нет маршрутов — принимает все источники
+          {% else %}
+            <i class="bi bi-check2-circle me-1 text-success"></i>{{ target_routed|length }} из {{ sources|length }} источников
+          {% endif %}
+        </span>
+      </div>
+      <div class="card-body pb-2">
+        <form method="post" action="/routes/{{ target.id }}/sync">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="row g-2 mb-3">
+            {% for source in sources %}
+            <div class="col-md-4 col-lg-3">
+              <label class="d-flex align-items-start gap-2 p-2 rounded border w-100 mb-0 {% if (source.id, target.id) in routed %}border-primary bg-primary bg-opacity-10{% else %}border-secondary border-opacity-25{% endif %}"
+                     for="s{{ target.id }}_{{ source.id }}" style="cursor:pointer;min-height:2.5rem">
+                <input class="form-check-input flex-shrink-0 mt-1" type="checkbox" name="source_ids"
+                       value="{{ source.id }}" id="s{{ target.id }}_{{ source.id }}"
+                       {% if (source.id, target.id) in routed %}checked{% endif %}>
+                <div class="overflow-hidden">
+                  <div class="small fw-semibold text-truncate">{{ source.title }}</div>
+                  {% if source.username %}
+                    <div class="text-muted" style="font-size:.75rem">@{{ source.username }}</div>
+                  {% endif %}
+                  {% if not source.enabled %}
+                    <div class="text-danger" style="font-size:.72rem">отключён</div>
+                  {% endif %}
+                </div>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-sm btn-primary">
+              <i class="bi bi-check-lg me-1"></i>Сохранить маршруты
+            </button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectAll(this)">Выбрать все</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="selectNone(this)">Снять все</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% endif %}
+
+<script>
+function selectAll(btn) {
+  btn.closest('form').querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = true);
+}
+function selectNone(btn) {
+  btn.closest('form').querySelectorAll('input[type=checkbox]').forEach(cb => cb.checked = false);
+}
+</script>
+
+{% endblock %}

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
-from app.models import ActionLog, AppSetting, GeneratedPost, GeneratedPostStatus, MediaItem, RawPost, RawPostStatus, SourceChannel, TargetChannel
+from app.models import ActionLog, AppSetting, GeneratedPost, GeneratedPostStatus, MediaItem, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
 from app.services.news_pipeline import NewsPipelineService
@@ -299,6 +299,68 @@ async def test_target(target_id: int, db: Session = Depends(get_db), _: bool = D
     if ok:
         return RedirectResponse(url=f"/targets?ok={urllib.parse.quote(f'{target.title}: бот — {msg}')}", status_code=302)
     return RedirectResponse(url=f"/targets?error={urllib.parse.quote(f'{target.title}: {msg}')}", status_code=302)
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
+
+@router.get("/routes")
+def routes_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None):
+    sources = db.scalars(select(SourceChannel).order_by(SourceChannel.title)).all()
+    targets = db.scalars(select(TargetChannel).order_by(TargetChannel.title)).all()
+    existing_routes = db.scalars(select(SourceTargetRoute)).all()
+    routed = {(r.source_id, r.target_channel_id) for r in existing_routes}
+    return tpl(request, "routes.html", db, {
+        "sources": sources, "targets": targets, "routed": routed, "ok": ok,
+    })
+
+
+@router.post("/routes/{target_id}/sync")
+async def sync_routes(
+    target_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    target = db.get(TargetChannel, target_id)
+    if not target:
+        return RedirectResponse(url="/routes", status_code=302)
+
+    form = await request.form()
+    selected_ids = {int(v) for k, v in form.multi_items() if k == "source_ids"}
+
+    existing = {
+        r.source_id: r
+        for r in db.scalars(select(SourceTargetRoute).where(SourceTargetRoute.target_channel_id == target_id)).all()
+    }
+
+    added, removed = [], []
+    for source_id in selected_ids:
+        if source_id not in existing:
+            db.add(SourceTargetRoute(source_id=source_id, target_channel_id=target_id, enabled=True))
+            src = db.get(SourceChannel, source_id)
+            added.append(src.title if src else str(source_id))
+
+    for source_id, route in existing.items():
+        if source_id not in selected_ids:
+            db.delete(route)
+            src = db.get(SourceChannel, source_id)
+            removed.append(src.title if src else str(source_id))
+
+    if added or removed:
+        parts = []
+        if added:
+            parts.append(f"добавлено: {', '.join(added)}")
+        if removed:
+            parts.append(f"удалено: {', '.join(removed)}")
+        db.add(ActionLog(
+            action="routes_sync",
+            entity_type="TargetChannel",
+            entity_id=str(target_id),
+            message=f"Маршруты «{target.title}»: {'; '.join(parts)}",
+        ))
+
+    db.commit()
+    return RedirectResponse(url=f"/routes?ok={urllib.parse.quote(f'Маршруты канала «{target.title}» сохранены')}", status_code=302)
 
 
 # ── Posts ─────────────────────────────────────────────────────────────────────

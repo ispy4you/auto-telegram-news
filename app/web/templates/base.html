@@ -64,6 +64,9 @@
     <a class="nav-link {% if request.url.path.startswith('/targets') %}active{% endif %}" href="/targets">
       <i class="bi bi-send"></i> Публикация
     </a>
+    <a class="nav-link {% if request.url.path.startswith('/routes') %}active{% endif %}" href="/routes">
+      <i class="bi bi-diagram-3"></i> Маршруты
+    </a>
 
     <div class="section-label">Система</div>
     <a class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}" href="/settings">
