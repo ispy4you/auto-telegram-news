@@ -175,6 +175,12 @@ DEFAULT_POST_MODE=manual
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+Или напрямую из venv без активации окружения:
+
+```bash
+.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
 ### VPS Ubuntu (production)
 
 1. Установите Python 3.12+, venv, git.
