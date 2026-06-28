@@ -22,9 +22,13 @@ Path("data/telegram_session").mkdir(parents=True, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 
 with engine.connect() as _conn:
-    for _col in ("publish_from", "publish_to"):
+    for _tbl, _col, _typ in [
+        ("target_channels", "publish_from", "TEXT"),
+        ("target_channels", "publish_to", "TEXT"),
+        ("generated_posts", "telegram_message_id", "INTEGER"),
+    ]:
         try:
-            _conn.execute(text(f"ALTER TABLE target_channels ADD COLUMN {_col} TEXT"))
+            _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
             _conn.commit()
         except Exception:
             pass

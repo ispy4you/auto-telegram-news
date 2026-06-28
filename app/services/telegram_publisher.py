@@ -105,16 +105,19 @@ class TelegramPublisherService:
             if include_media and media and not existing_media and not publish_text_only_on_missing_media:
                 raise FileNotFoundError("All media files missing")
 
+            sent_msg_id: int | None = None
             if not existing_media:
-                await bot.send_message(chat_id=target.chat_id, text=text)
+                msg = await bot.send_message(chat_id=target.chat_id, text=text)
+                sent_msg_id = msg.message_id
             elif len(existing_media) == 1:
                 m = existing_media[0]
                 file = FSInputFile(m.file_path)
                 caption = text if len(text) <= 1024 else None
                 if m.media_type == "video":
-                    await bot.send_video(chat_id=target.chat_id, video=file, caption=caption)
+                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption)
                 else:
-                    await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption)
+                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption)
+                sent_msg_id = msg.message_id
                 if caption is None:
                     await bot.send_message(chat_id=target.chat_id, text=text)
             else:
@@ -127,11 +130,13 @@ class TelegramPublisherService:
                         group.append(InputMediaVideo(media=file, caption=caption))
                     else:
                         group.append(InputMediaPhoto(media=file, caption=caption))
-                await bot.send_media_group(chat_id=target.chat_id, media=group)
+                msgs = await bot.send_media_group(chat_id=target.chat_id, media=group)
+                sent_msg_id = msgs[0].message_id if msgs else None
                 if not use_caption:
                     await bot.send_message(chat_id=target.chat_id, text=text)
 
             generated.status = GeneratedPostStatus.PUBLISHED.value
+            generated.telegram_message_id = sent_msg_id
             generated.published_at = datetime.now(timezone.utc).replace(tzinfo=None)
             raw_post.status = RawPostStatus.PUBLISHED.value
             job.status = PublishJobStatus.SUCCESS.value

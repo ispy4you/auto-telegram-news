@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-semibold mb-0">Статистика публикаций</h4>
+</div>
+
+{# Воронка #}
+<div class="row g-3 mb-4">
+  {% set f = funnel %}
+  {% set steps = [
+    ('Собрано', f.fetched, 'secondary'),
+    ('Уникальных', f.unique, 'primary'),
+    ('Сгенерировано', f.generated, 'info'),
+    ('Опубликовано', f.published, 'success'),
+  ] %}
+  {% for label, val, color in steps %}
+  <div class="col-6 col-md-3">
+    <div class="card card-body text-center py-3 border-{{ color }} border-top border-3">
+      <div class="fs-2 fw-bold text-{{ color }}">{{ val }}</div>
+      <div class="text-muted small">{{ label }}</div>
+      {% if loop.index > 1 and steps[loop.index0 - 1][1] %}
+      <div class="text-muted" style="font-size:.72rem">
+        {{ (val / steps[loop.index0 - 1][1] * 100) | round(1) }}% от предыдущего
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="row g-3 mb-4">
+
+  {# График публикаций по дням #}
+  <div class="col-lg-8">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">Публикации за последние 14 дней</div>
+      <div class="card-body">
+        <canvas id="dailyChart" height="90"></canvas>
+      </div>
+    </div>
+  </div>
+
+  {# Публикации по каналам #}
+  <div class="col-lg-4">
+    <div class="card h-100">
+      <div class="card-header bg-white fw-semibold">По каналам</div>
+      <div class="card-body">
+        {% if target_stats %}
+        {% set max_t = target_stats[0].count %}
+        {% for t in target_stats %}
+        <div class="mb-2">
+          <div class="d-flex justify-content-between small mb-1">
+            <span class="text-truncate me-2" style="max-width:160px" title="{{ t.title }}">{{ t.title }}</span>
+            <span class="fw-semibold text-nowrap">{{ t.count }}</span>
+          </div>
+          <div class="progress" style="height:6px">
+            <div class="progress-bar bg-primary"
+              style="width:{{ (t.count / max_t * 100) | round }}%"></div>
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <div class="text-muted text-center py-4">Нет данных</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# Топ источников #}
+<div class="card">
+  <div class="card-header bg-white fw-semibold">Топ источников по публикациям</div>
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3">#</th>
+          <th>Источник</th>
+          <th>Опубликовано</th>
+          <th>Отклонено</th>
+          <th>Принято</th>
+          <th style="width:200px">Доля принятия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in top_sources %}
+        <tr>
+          <td class="ps-3 text-muted small">{{ loop.index }}</td>
+          <td class="fw-semibold">{{ s.title }}</td>
+          <td class="text-success">{{ s.published }}</td>
+          <td class="text-danger">{{ s.rejected }}</td>
+          <td>
+            {% if s.rate >= 70 %}
+              <span class="badge bg-success">{{ s.rate }}%</span>
+            {% elif s.rate >= 40 %}
+              <span class="badge bg-warning text-dark">{{ s.rate }}%</span>
+            {% else %}
+              <span class="badge bg-danger">{{ s.rate }}%</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="progress" style="height:8px">
+              <div class="progress-bar
+                {% if s.rate >= 70 %}bg-success{% elif s.rate >= 40 %}bg-warning{% else %}bg-danger{% endif %}"
+                style="width:{{ s.rate }}%"></div>
+            </div>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6" class="text-muted text-center py-4">Нет данных</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  const labels = {{ daily_labels | tojson }};
+  const data   = {{ daily_counts | tojson }};
+  const ctx = document.getElementById('dailyChart');
+  if (!ctx) return;
+  new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        label: 'Опубликовано',
+        data,
+        backgroundColor: 'rgba(13, 110, 253, 0.7)',
+        borderRadius: 4,
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: ctx => ' ' + ctx.parsed.y + ' публикаций' } }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: '#f0f0f0' } },
+        x: { grid: { display: false } }
+      }
+    }
+  });
+})();
+</script>
+{% endblock %}
