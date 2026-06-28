@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost, RawPostStatus
@@ -22,6 +22,7 @@ class SchedulerService:
         self._lock = asyncio.Lock()
         self.last_run_at: datetime | None = None
         self.is_running: bool = False
+        self._last_draft_notified: int = 0
 
     @property
     def next_run_at(self) -> datetime | None:
@@ -74,6 +75,30 @@ class SchedulerService:
             except Exception:
                 pass
 
+    async def _check_draft_notification(self, db):
+        from app.services.prompt_settings import _get_setting
+        try:
+            threshold = int(_get_setting(db, "notify_draft_threshold", "0"))
+        except (ValueError, TypeError):
+            threshold = 0
+        if threshold <= 0:
+            return
+
+        count = db.scalar(
+            select(func.count()).select_from(GeneratedPost)
+            .where(GeneratedPost.status.in_([GeneratedPostStatus.DRAFT.value, GeneratedPostStatus.APPROVED.value]))
+        ) or 0
+
+        if count >= threshold and count > self._last_draft_notified:
+            self._last_draft_notified = count
+            from app.services.notifier import notify_operator
+            await notify_operator(
+                db,
+                f"📬 <b>Накопилось черновиков: {count}</b>\n\nПорог: {threshold}. Требуется проверка в панели управления.",
+            )
+        elif count < threshold:
+            self._last_draft_notified = 0
+
     async def _safe_run(self):
         if not self._lock.locked():
             async with self._lock:
@@ -81,12 +106,12 @@ class SchedulerService:
                 self.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 with SessionLocal() as db:
                     try:
-                        from sqlalchemy import func
                         before_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
 
                         await self.pipeline.run_once(db)
                         await self._retry_failed_jobs(db)
                         await self._process_scheduled_jobs(db)
+                        await self._check_draft_notification(db)
 
                         after_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
                         fetched = max(0, after_total - before_total)
@@ -96,6 +121,24 @@ class SchedulerService:
                             entity_type="Scheduler",
                             entity_id="auto",
                             message=f"Автосбор завершён. Новых постов: {fetched}. Интервал: {self.interval_seconds}с",
+                        ))
+                        db.commit()
+                    except Exception as exc:
+                        from app.services.prompt_settings import _get_setting
+                        if _get_setting(db, "notify_on_error", "false") == "true":
+                            from app.services.notifier import notify_operator
+                            try:
+                                await notify_operator(
+                                    db,
+                                    f"⚠️ <b>Ошибка пайплайна</b>\n\n<code>{type(exc).__name__}: {exc}</code>",
+                                )
+                            except Exception:
+                                pass
+                        db.add(ActionLog(
+                            action="scheduler_error",
+                            entity_type="Scheduler",
+                            entity_id="auto",
+                            message=f"Ошибка: {exc}",
                         ))
                         db.commit()
                     finally:

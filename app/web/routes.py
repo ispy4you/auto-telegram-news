@@ -721,6 +721,9 @@ def settings_save(
     ai_system_prompt: str = Form(""),
     ai_prompt_template: str = Form(""),
     global_auto_publish_enabled: str | None = Form(None),
+    operator_chat_id: str = Form(""),
+    notify_on_error: str | None = Form(None),
+    notify_draft_threshold: str = Form("0"),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -742,6 +745,11 @@ def settings_save(
     except (ZoneInfoNotFoundError, Exception):
         display_timezone = "Europe/Moscow"
 
+    try:
+        draft_threshold = max(0, int(notify_draft_threshold))
+    except (ValueError, TypeError):
+        draft_threshold = 0
+
     values = {
         "duplicate_threshold": str(threshold),
         "fetch_interval_seconds": str(interval),
@@ -750,6 +758,9 @@ def settings_save(
         "ai_system_prompt": ai_system_prompt,
         "ai_prompt_template": ai_prompt_template,
         "global_auto_publish_enabled": "true" if _to_bool(global_auto_publish_enabled) else "false",
+        "operator_chat_id": operator_chat_id.strip(),
+        "notify_on_error": "true" if _to_bool(notify_on_error) else "false",
+        "notify_draft_threshold": str(draft_threshold),
         "updated_at": _utcnow().isoformat(),
     }
     for k, v in values.items():
@@ -768,6 +779,15 @@ def settings_save(
             logger.warning("Could not update scheduler interval: %s", exc)
 
     return RedirectResponse(url="/settings", status_code=302)
+
+
+@router.post("/settings/test-notify")
+async def settings_test_notify(db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    from app.services.notifier import notify_operator
+    ok = await notify_operator(db, "✅ <b>Тестовое уведомление</b>\n\nУведомления настроены и работают.")
+    if ok:
+        return RedirectResponse(url="/settings?ok=Тестовое+уведомление+отправлено", status_code=302)
+    return RedirectResponse(url="/settings?ok=Не+удалось+отправить:+проверьте+chat_id+и+bot_token", status_code=302)
 
 
 # ── Logs ──────────────────────────────────────────────────────────────────────

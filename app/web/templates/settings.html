@@ -103,12 +103,58 @@
     </div>
   </div>
 
+  {# Уведомления оператору #}
+  <div class="col-12">
+    <div class="card">
+      <div class="card-header bg-white fw-semibold">Уведомления оператору</div>
+      <div class="card-body">
+        <div class="row g-3">
+          <div class="col-md-5">
+            <label class="form-label">Chat ID оператора</label>
+            <input class="form-control" name="operator_chat_id"
+              value="{{ cfg.get('operator_chat_id', '') }}"
+              placeholder="123456789 или @username">
+            <div class="form-text text-muted">Telegram ID личного чата. Узнать у <code>@userinfobot</code></div>
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">Уведомить при накоплении черновиков</label>
+            <input class="form-control" type="number" name="notify_draft_threshold" min="0"
+              value="{{ cfg.get('notify_draft_threshold', '0') }}"
+              placeholder="0 — выключено">
+            <div class="form-text text-muted">0 — не уведомлять</div>
+          </div>
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="notify_on_error" id="notify-err"
+                {% if cfg.get('notify_on_error') == 'true' %}checked{% endif %}>
+              <label class="form-check-label" for="notify-err">Уведомлять об ошибках пайплайна</label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="col-12">
     <button class="btn btn-primary"><i class="bi bi-floppy me-1"></i>Сохранить настройки</button>
   </div>
 
 </div>
 </form>
+
+{# Тест уведомлений #}
+{% if cfg.get('operator_chat_id') %}
+<div class="card mt-3">
+  <div class="card-header bg-white fw-semibold">Тест уведомлений</div>
+  <div class="card-body d-flex align-items-center gap-3">
+    <form method="post" action="/settings/test-notify">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="btn btn-outline-primary"><i class="bi bi-send me-1"></i>Отправить тестовое сообщение</button>
+    </form>
+    <span class="text-muted small">Будет отправлено на <code>{{ cfg.get('operator_chat_id') }}</code></span>
+  </div>
+</div>
+{% endif %}
 
 {# Медиафайлы — очистка #}
 <div class="card mt-4">
