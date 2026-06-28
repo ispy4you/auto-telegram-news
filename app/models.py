@@ -114,6 +114,7 @@ class RawPost(Base):
     original_text: Mapped[str] = mapped_column(Text, default="")
     normalized_text: Mapped[str] = mapped_column(Text, default="")
     text_hash: Mapped[str] = mapped_column(String(64), index=True)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)
     published_at_source: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     has_media: Mapped[bool] = mapped_column(Boolean, default=False)

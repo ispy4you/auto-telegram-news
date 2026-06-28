@@ -1,4 +1,5 @@
 import hashlib
+import json
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -36,6 +37,7 @@ class DeduplicationService:
             post.status = RawPostStatus.READY.value
             return post
 
+        # Phase 1: exact hash match
         same_hash = db.scalar(
             select(RawPost).where(RawPost.id != post.id, RawPost.text_hash == post.text_hash).limit(1)
         )
@@ -52,7 +54,6 @@ class DeduplicationService:
                 RawPost.id != post.id,
                 RawPost.created_at >= boundary,
                 RawPost.status != RawPostStatus.FAILED.value,
-                # Pre-filter by approximate text length to avoid loading very short/long posts
                 func.length(RawPost.normalized_text).between(
                     max(1, text_len // 2),
                     text_len * 2 + 1,
@@ -60,6 +61,7 @@ class DeduplicationService:
             ).limit(500)
         ).all()
 
+        # Phase 2: rapidfuzz lexical similarity
         for candidate in candidates:
             score = fuzz.token_set_ratio(post.normalized_text, candidate.normalized_text or "")
             if score >= self.threshold:
@@ -67,6 +69,39 @@ class DeduplicationService:
                 post.duplicate_of_id = candidate.id
                 post.dedupe_score = float(score)
                 return post
+
+        # Phase 3: semantic similarity (optional, requires fastembed)
+        from app.services.prompt_settings import _get_setting
+        try:
+            semantic_threshold = float(_get_setting(db, "semantic_threshold", "0"))
+        except (ValueError, TypeError):
+            semantic_threshold = 0.0
+
+        if semantic_threshold > 0:
+            from app.services import embedder as _emb
+            # Compute embedding for this post if not already stored
+            if post.embedding is None:
+                vec_json = _emb.embed_text_json(normalized)
+                if vec_json:
+                    post.embedding = vec_json
+
+            if post.embedding:
+                post_vec = json.loads(post.embedding)
+                for candidate in candidates:
+                    if candidate.embedding:
+                        sim = _emb.cosine_similarity(post_vec, json.loads(candidate.embedding))
+                        if sim >= semantic_threshold:
+                            post.status = RawPostStatus.DUPLICATE.value
+                            post.duplicate_of_id = candidate.id
+                            post.dedupe_score = round(sim * 100, 2)
+                            return post
+
+            # Store embedding for future comparisons even if this post is unique
+            if post.embedding is None:
+                from app.services import embedder as _emb
+                vec_json = _emb.embed_text_json(normalized)
+                if vec_json:
+                    post.embedding = vec_json
 
         post.status = RawPostStatus.READY.value
         return post

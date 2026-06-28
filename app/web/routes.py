@@ -803,6 +803,7 @@ def settings_save(
     operator_chat_id: str = Form(""),
     notify_on_error: str | None = Form(None),
     notify_draft_threshold: str = Form("0"),
+    semantic_threshold: str = Form("0"),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -840,6 +841,7 @@ def settings_save(
         "operator_chat_id": operator_chat_id.strip(),
         "notify_on_error": "true" if _to_bool(notify_on_error) else "false",
         "notify_draft_threshold": str(draft_threshold),
+        "semantic_threshold": str(max(0.0, min(1.0, float(semantic_threshold or 0)))),
         "updated_at": _utcnow().isoformat(),
     }
     for k, v in values.items():

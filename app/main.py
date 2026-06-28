@@ -28,6 +28,7 @@ with engine.connect() as _conn:
         ("generated_posts", "telegram_message_id", "INTEGER"),
         ("source_channels", "project_id", "INTEGER"),
         ("target_channels", "project_id", "INTEGER"),
+        ("raw_posts", "embedding", "TEXT"),
     ]:
         try:
             _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
