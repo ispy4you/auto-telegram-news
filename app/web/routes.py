@@ -226,7 +226,7 @@ def sources(request: Request, db: Session = Depends(get_db), _: bool = Depends(r
 
 
 @router.post("/sources")
-def create_source(
+async def create_source(
     request: Request,
     title: str = Form(...),
     username_or_url: str = Form(...),
@@ -237,24 +237,33 @@ def create_source(
     username = TelegramReaderService._extract_username(username_or_url)
     db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True, project_id=pid))
     db.commit()
+    listener = getattr(request.app.state, "event_listener", None)
+    if listener:
+        await listener.reload_sources()
     return RedirectResponse(url="/sources", status_code=302)
 
 
 @router.post("/sources/{source_id}/toggle")
-def toggle_source(source_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+async def toggle_source(source_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     source = db.get(SourceChannel, source_id)
     if source:
         source.enabled = not source.enabled
         db.commit()
+    listener = getattr(request.app.state, "event_listener", None)
+    if listener:
+        await listener.reload_sources()
     return RedirectResponse(url="/sources", status_code=302)
 
 
 @router.post("/sources/{source_id}/delete")
-def delete_source(source_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+async def delete_source(source_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     source = db.get(SourceChannel, source_id)
     if source:
         db.delete(source)
         db.commit()
+    listener = getattr(request.app.state, "event_listener", None)
+    if listener:
+        await listener.reload_sources()
     return RedirectResponse(url="/sources", status_code=302)
 
 

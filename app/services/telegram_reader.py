@@ -104,10 +104,6 @@ class TelegramReaderService:
             journal.unlink()
 
     async def _do_fetch(self, db: Session, source: SourceChannel, limit: int) -> int:
-        new_count = 0
-        albums: dict[int, list] = defaultdict(list)
-        standalone_messages = []
-
         self._fix_session_journal(self.settings.telegram_session_path)
         client = self._client()
         await client.connect()
@@ -125,47 +121,59 @@ class TelegramReaderService:
                     "python -m app.cli.init_telegram_session"
                 )
 
-            entity = await client.get_entity(source.username)
-            if source.last_message_id:
-                # Инкрементальный fetch — только новые посты, быстро
-                kwargs = {"limit": limit, "min_id": source.last_message_id}
-            else:
-                # Первый fetch — берём только последние 5 постов чтобы не ждать
-                kwargs = {"limit": 5}
-
-            messages = [m async for m in client.iter_messages(entity, **kwargs)]
-            messages = list(reversed(messages))
-
-            for msg in messages:
-                if not msg:
-                    continue
-                if msg.grouped_id:
-                    albums[msg.grouped_id].append(msg)
-                else:
-                    standalone_messages.append(msg)
-
-            # Фаза 1 (внутри Telethon-соединения): скачиваем медиа на диск, без DB-записей
-            pending: list[dict] = []
-
-            for msg in standalone_messages:
-                if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_message_id == msg.id)):
-                    continue
-                media_files = await self._download_media_list(source, msg.id, [msg], client)
-                pending.append({"msg": msg, "album": None, "media_files": media_files})
-
-            for grouped_id in albums:
-                grouped_messages = sorted(albums[grouped_id], key=lambda m: m.id)
-                if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_grouped_id == grouped_id)):
-                    continue
-                media_files = await self._download_media_list(source, grouped_messages[0].id, grouped_messages, client)
-                pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
-
-            last_msg_id = max((m.id for m in messages), default=None)
-
+            pending, last_msg_id = await self._collect_pending(client, db, source, limit)
         finally:
             await client.disconnect()
 
-        # Фаза 2 (вне Telethon, без async I/O): быстро пишем в DB, write-лок держится минимально
+        return self._flush_pending(db, source, pending, last_msg_id)
+
+    async def _collect_pending(
+        self, client: TelegramClient, db: Session, source: SourceChannel, limit: int
+    ) -> tuple[list[dict], int | None]:
+        """Фаза 1: собирает сообщения и скачивает медиа. Клиент должен быть подключён."""
+        albums: dict[int, list] = defaultdict(list)
+        standalone_messages = []
+
+        entity = await client.get_entity(source.username)
+        if source.last_message_id:
+            fetch_kwargs: dict = {"limit": limit, "min_id": source.last_message_id}
+        else:
+            fetch_kwargs = {"limit": 5}
+
+        messages = [m async for m in client.iter_messages(entity, **fetch_kwargs)]
+        messages = list(reversed(messages))
+
+        for msg in messages:
+            if not msg:
+                continue
+            if msg.grouped_id:
+                albums[msg.grouped_id].append(msg)
+            else:
+                standalone_messages.append(msg)
+
+        pending: list[dict] = []
+
+        for msg in standalone_messages:
+            if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_message_id == msg.id)):
+                continue
+            media_files = await self._download_media_list(source, msg.id, [msg], client)
+            pending.append({"msg": msg, "album": None, "media_files": media_files})
+
+        for grouped_id in albums:
+            grouped_messages = sorted(albums[grouped_id], key=lambda m: m.id)
+            if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_grouped_id == grouped_id)):
+                continue
+            media_files = await self._download_media_list(source, grouped_messages[0].id, grouped_messages, client)
+            pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
+
+        last_msg_id = max((m.id for m in messages), default=None)
+        return pending, last_msg_id
+
+    def _flush_pending(
+        self, db: Session, source: SourceChannel, pending: list[dict], last_msg_id: int | None
+    ) -> int:
+        """Фаза 2: записывает накопленные посты в DB."""
+        new_count = 0
         for item in pending:
             post = self._write_post(db, source, item["msg"], item["album"], item["media_files"])
             if post:

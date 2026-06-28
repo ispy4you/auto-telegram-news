@@ -14,11 +14,12 @@ _JOB_ID = "main_pipeline"
 
 
 class SchedulerService:
-    def __init__(self, interval_seconds: int):
+    def __init__(self, interval_seconds: int, listener=None):
         self.scheduler = AsyncIOScheduler()
         self.pipeline = NewsPipelineService()
         self.publisher = TelegramPublisherService()
         self.interval_seconds = interval_seconds
+        self.listener = listener  # TelegramEventListenerService | None
         self._lock = asyncio.Lock()
         self.last_run_at: datetime | None = None
         self.is_running: bool = False
@@ -106,21 +107,23 @@ class SchedulerService:
                 self.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 with SessionLocal() as db:
                     try:
+                        skip_fetch = bool(self.listener and self.listener.is_active)
                         before_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
 
-                        await self.pipeline.run_once(db)
+                        await self.pipeline.run_once(db, skip_fetch=skip_fetch)
                         await self._retry_failed_jobs(db)
                         await self._process_scheduled_jobs(db)
                         await self._check_draft_notification(db)
 
                         after_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
                         fetched = max(0, after_total - before_total)
+                        fetch_mode = "event" if skip_fetch else "poll"
 
                         db.add(ActionLog(
                             action="scheduler_run",
                             entity_type="Scheduler",
                             entity_id="auto",
-                            message=f"Автосбор завершён. Новых постов: {fetched}. Интервал: {self.interval_seconds}с",
+                            message=f"Автосбор завершён [{fetch_mode}]. Новых постов: {fetched}. Интервал: {self.interval_seconds}с",
                         ))
                         db.commit()
                     except Exception as exc:

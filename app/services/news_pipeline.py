@@ -90,7 +90,8 @@ class NewsPipelineService:
                     db.add(ActionLog(action="autopublish_error", entity_type="GeneratedPost", entity_id=str(generated.id), message=str(exc)))
                     db.commit()
 
-    async def run_once(self, db: Session):
-        await self.fetch_new_posts(db)
+    async def run_once(self, db: Session, skip_fetch: bool = False):
+        if not skip_fetch:
+            await self.fetch_new_posts(db)
         await self.process_ready_posts(db)
         await self.run_autopublish(db)
