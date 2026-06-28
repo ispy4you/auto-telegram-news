@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
-from app.models import ActionLog, AppSetting, GeneratedPost, GeneratedPostStatus, MediaItem, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
+from app.models import ActionLog, AppSetting, GeneratedPost, GeneratedPostStatus, MediaItem, Project, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
 from app.services.news_pipeline import NewsPipelineService
@@ -46,19 +46,43 @@ def _localdt_filter(dt, tz_name: str, fmt: str = "%d.%m.%Y %H:%M") -> str:
 templates.env.filters["localdt"] = _localdt_filter
 
 
-def _nav_counts(db: Session) -> dict:
+def _current_project_id(request: Request, db: Session) -> int | None:
+    pid = request.session.get("current_project_id")
+    if pid and db.get(Project, pid):
+        return pid
+    p = db.scalars(select(Project).order_by(Project.id).limit(1)).first()
+    if p:
+        request.session["current_project_id"] = p.id
+        return p.id
+    return None
+
+
+def _nav_counts(db: Session, project_id: int | None = None) -> dict:
+    new_q = select(func.count()).select_from(RawPost).where(RawPost.status.in_(["new", "ready"]))
+    draft_q = select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.DRAFT.value)
+    if project_id is not None:
+        new_q = new_q.join(SourceChannel, RawPost.source_id == SourceChannel.id).where(SourceChannel.project_id == project_id)
+        draft_q = (draft_q
+            .join(RawPost, GeneratedPost.raw_post_id == RawPost.id)
+            .join(SourceChannel, RawPost.source_id == SourceChannel.id)
+            .where(SourceChannel.project_id == project_id))
     return {
-        "nav_new": db.scalar(select(func.count()).select_from(RawPost).where(RawPost.status.in_(["new", "ready"]))) or 0,
-        "nav_drafts": db.scalar(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.DRAFT.value)) or 0,
+        "nav_new": db.scalar(new_q) or 0,
+        "nav_drafts": db.scalar(draft_q) or 0,
         "display_tz": get_display_timezone(db),
     }
 
 
 def tpl(request: Request, name: str, db: Session, ctx: dict = None):
+    project_id = _current_project_id(request, db)
+    current_project = db.get(Project, project_id) if project_id else None
+    all_projects = db.scalars(select(Project).order_by(Project.name)).all()
     return templates.TemplateResponse(request, name, {
         **(ctx or {}),
-        **_nav_counts(db),
+        **_nav_counts(db, project_id),
         "csrf_token": request.session.get("csrf_token", ""),
+        "current_project": current_project,
+        "all_projects": all_projects,
     })
 
 
@@ -109,22 +133,42 @@ def serve_media(path: str, _: bool = Depends(require_auth)):
 async def dashboard(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     today = date.today()
     week_ago = today - timedelta(days=7)
+    pid = _current_project_id(request, db)
+
+    def _src_filter(q):
+        return q.join(SourceChannel, RawPost.source_id == SourceChannel.id).where(SourceChannel.project_id == pid) if pid is not None else q
+
+    def _gen_filter(q):
+        return (q.join(RawPost, GeneratedPost.raw_post_id == RawPost.id)
+                  .join(SourceChannel, RawPost.source_id == SourceChannel.id)
+                  .where(SourceChannel.project_id == pid)) if pid is not None else q
+
+    src_base = select(func.count()).select_from(SourceChannel)
+    if pid is not None:
+        src_base = src_base.where(SourceChannel.project_id == pid)
+
+    tgt_base = select(TargetChannel).where(TargetChannel.enabled.is_(True))
+    if pid is not None:
+        tgt_base = tgt_base.where(TargetChannel.project_id == pid)
 
     stats = {
-        "sources_active": db.scalar(select(func.count()).select_from(SourceChannel).where(SourceChannel.enabled.is_(True))) or 0,
-        "sources_total": db.scalar(select(func.count()).select_from(SourceChannel)) or 0,
-        "new_posts": db.scalar(select(func.count()).select_from(RawPost).where(RawPost.status.in_(["new", "ready"]))) or 0,
-        "duplicates": db.scalar(select(func.count()).select_from(RawPost).where(RawPost.status == RawPostStatus.DUPLICATE.value)) or 0,
-        "drafts": db.scalar(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.DRAFT.value)) or 0,
-        "published_today": db.scalar(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.PUBLISHED.value, func.date(GeneratedPost.published_at) == today)) or 0,
-        "published_week": db.scalar(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.PUBLISHED.value, func.date(GeneratedPost.published_at) >= week_ago)) or 0,
-        "fetched_today": db.scalar(select(func.count()).select_from(RawPost).where(func.date(RawPost.created_at) == today)) or 0,
-        "fetched_week": db.scalar(select(func.count()).select_from(RawPost).where(func.date(RawPost.created_at) >= week_ago)) or 0,
-        "rejected_total": db.scalar(select(func.count()).select_from(RawPost).where(RawPost.status == RawPostStatus.REJECTED.value)) or 0,
+        "sources_active": db.scalar(src_base.where(SourceChannel.enabled.is_(True))) or 0,
+        "sources_total": db.scalar(src_base) or 0,
+        "new_posts": db.scalar(_src_filter(select(func.count()).select_from(RawPost).where(RawPost.status.in_(["new", "ready"])))) or 0,
+        "duplicates": db.scalar(_src_filter(select(func.count()).select_from(RawPost).where(RawPost.status == RawPostStatus.DUPLICATE.value))) or 0,
+        "drafts": db.scalar(_gen_filter(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.DRAFT.value))) or 0,
+        "published_today": db.scalar(_gen_filter(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.PUBLISHED.value, func.date(GeneratedPost.published_at) == today))) or 0,
+        "published_week": db.scalar(_gen_filter(select(func.count()).select_from(GeneratedPost).where(GeneratedPost.status == GeneratedPostStatus.PUBLISHED.value, func.date(GeneratedPost.published_at) >= week_ago))) or 0,
+        "fetched_today": db.scalar(_src_filter(select(func.count()).select_from(RawPost).where(func.date(RawPost.created_at) == today))) or 0,
+        "fetched_week": db.scalar(_src_filter(select(func.count()).select_from(RawPost).where(func.date(RawPost.created_at) >= week_ago))) or 0,
+        "rejected_total": db.scalar(_src_filter(select(func.count()).select_from(RawPost).where(RawPost.status == RawPostStatus.REJECTED.value))) or 0,
     }
     recent_logs = db.scalars(select(ActionLog).order_by(ActionLog.created_at.desc()).limit(15)).all()
-    pending_posts = db.scalars(select(RawPost).options(joinedload(RawPost.source)).where(RawPost.status.in_(["new", "ready"])).order_by(RawPost.created_at.desc()).limit(10)).all()
-    targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
+    pending_q = select(RawPost).options(joinedload(RawPost.source)).where(RawPost.status.in_(["new", "ready"])).order_by(RawPost.created_at.desc()).limit(10)
+    if pid is not None:
+        pending_q = pending_q.join(SourceChannel, RawPost.source_id == SourceChannel.id).where(SourceChannel.project_id == pid)
+    pending_posts = db.scalars(pending_q).all()
+    targets = db.scalars(tgt_base).all()
     return tpl(request, "dashboard.html", db, {
         "stats": stats,
         "recent_logs": recent_logs,
@@ -163,7 +207,11 @@ async def fetch_now(request: Request, db: Session = Depends(get_db), _: bool = D
 
 @router.get("/sources")
 def sources(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), error: str | None = None, ok: str | None = None):
-    items = db.scalars(select(SourceChannel).order_by(SourceChannel.created_at.desc())).all()
+    pid = _current_project_id(request, db)
+    q = select(SourceChannel).order_by(SourceChannel.created_at.desc())
+    if pid is not None:
+        q = q.where(SourceChannel.project_id == pid)
+    items = db.scalars(q).all()
     source_ids = [s.id for s in items]
     post_totals = {row[0]: row[1] for row in db.execute(
         select(RawPost.source_id, func.count()).where(RawPost.source_id.in_(source_ids)).group_by(RawPost.source_id)
@@ -179,13 +227,15 @@ def sources(request: Request, db: Session = Depends(get_db), _: bool = Depends(r
 
 @router.post("/sources")
 def create_source(
+    request: Request,
     title: str = Form(...),
     username_or_url: str = Form(...),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
+    pid = _current_project_id(request, db)
     username = TelegramReaderService._extract_username(username_or_url)
-    db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True))
+    db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True, project_id=pid))
     db.commit()
     return RedirectResponse(url="/sources", status_code=302)
 
@@ -226,12 +276,17 @@ async def fetch_source(source_id: int, db: Session = Depends(get_db), _: bool = 
 
 @router.get("/targets")
 def targets(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None, error: str | None = None):
-    items = db.scalars(select(TargetChannel).order_by(TargetChannel.created_at.desc())).all()
+    pid = _current_project_id(request, db)
+    q = select(TargetChannel).order_by(TargetChannel.created_at.desc())
+    if pid is not None:
+        q = q.where(TargetChannel.project_id == pid)
+    items = db.scalars(q).all()
     return tpl(request, "targets.html", db, {"items": items, "ok": ok, "error": error})
 
 
 @router.post("/targets")
 def create_target(
+    request: Request,
     title: str = Form(...),
     chat_id: str = Form(...),
     username: str = Form(""),
@@ -243,6 +298,7 @@ def create_target(
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
+    pid = _current_project_id(request, db)
     db.add(TargetChannel(
         title=title,
         chat_id=chat_id,
@@ -252,6 +308,7 @@ def create_target(
         default_mode=default_mode,
         publish_from=publish_from or None,
         publish_to=publish_to or None,
+        project_id=pid,
     ))
     db.commit()
     return RedirectResponse(url="/targets", status_code=302)
@@ -338,8 +395,14 @@ async def test_target(target_id: int, db: Session = Depends(get_db), _: bool = D
 
 @router.get("/routes")
 def routes_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None):
-    sources = db.scalars(select(SourceChannel).order_by(SourceChannel.title)).all()
-    targets = db.scalars(select(TargetChannel).order_by(TargetChannel.title)).all()
+    pid = _current_project_id(request, db)
+    src_q = select(SourceChannel).order_by(SourceChannel.title)
+    tgt_q = select(TargetChannel).order_by(TargetChannel.title)
+    if pid is not None:
+        src_q = src_q.where(SourceChannel.project_id == pid)
+        tgt_q = tgt_q.where(TargetChannel.project_id == pid)
+    sources = db.scalars(src_q).all()
+    targets = db.scalars(tgt_q).all()
     existing_routes = db.scalars(select(SourceTargetRoute)).all()
     routed = {(r.source_id, r.target_channel_id) for r in existing_routes}
     return tpl(request, "routes.html", db, {
@@ -409,6 +472,7 @@ def posts(
     sort: str | None = None,
     page: int = 1,
 ):
+    pid = _current_project_id(request, db)
     sort_map = {
         "oldest": RawPost.created_at.asc(),
         "source": RawPost.source_id.asc(),
@@ -416,6 +480,8 @@ def posts(
     }
     order = sort_map.get(sort, RawPost.created_at.desc())
     query = select(RawPost).options(joinedload(RawPost.source)).order_by(order)
+    if pid is not None:
+        query = query.join(SourceChannel, RawPost.source_id == SourceChannel.id).where(SourceChannel.project_id == pid)
     parsed_source_id = _parse_optional_int(source_id)
     if status:
         query = query.where(RawPost.status == status)
@@ -434,8 +500,13 @@ def posts(
     items = db.scalars(data_query.offset(offset).limit(_POSTS_PER_PAGE)).all()
 
     total_pages = max(1, (total + _POSTS_PER_PAGE - 1) // _POSTS_PER_PAGE)
-    sources = db.scalars(select(SourceChannel).order_by(SourceChannel.title)).all()
-    targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
+    src_q = select(SourceChannel).order_by(SourceChannel.title)
+    tgt_q = select(TargetChannel).where(TargetChannel.enabled.is_(True))
+    if pid is not None:
+        src_q = src_q.where(SourceChannel.project_id == pid)
+        tgt_q = tgt_q.where(TargetChannel.project_id == pid)
+    sources = db.scalars(src_q).all()
+    targets = db.scalars(tgt_q).all()
     filters = {"q": q or "", "source_id": source_id or "", "status": status or "", "sort": sort or ""}
     base_qs = urllib.parse.urlencode({k: v for k, v in filters.items() if v})
     return tpl(request, "posts.html", db, {
@@ -524,7 +595,11 @@ def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _
     )
     if not post:
         raise HTTPException(status_code=404, detail="Post not found")
-    targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
+    pid = _current_project_id(request, db)
+    tgt_q = select(TargetChannel).where(TargetChannel.enabled.is_(True))
+    if pid is not None:
+        tgt_q = tgt_q.where(TargetChannel.project_id == pid)
+    targets = db.scalars(tgt_q).all()
     return tpl(request, "post_detail.html", db, {"post": post, "targets": targets})
 
 
@@ -628,17 +703,21 @@ def delete_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(r
 
 @router.get("/generated")
 def generated_posts(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), page: int = 1):
+    pid = _current_project_id(request, db)
     page = max(1, page)
-    total = db.scalar(select(func.count()).select_from(GeneratedPost)) or 0
+    gen_q = select(GeneratedPost).options(joinedload(GeneratedPost.raw_post)).order_by(GeneratedPost.created_at.desc())
+    if pid is not None:
+        gen_q = (gen_q
+            .join(RawPost, GeneratedPost.raw_post_id == RawPost.id)
+            .join(SourceChannel, RawPost.source_id == SourceChannel.id)
+            .where(SourceChannel.project_id == pid))
+    total = db.scalar(select(func.count()).select_from(gen_q.subquery())) or 0
     total_pages = max(1, (total + _GENERATED_PER_PAGE - 1) // _GENERATED_PER_PAGE)
-    items = db.scalars(
-        select(GeneratedPost)
-        .options(joinedload(GeneratedPost.raw_post))
-        .order_by(GeneratedPost.created_at.desc())
-        .offset((page - 1) * _GENERATED_PER_PAGE)
-        .limit(_GENERATED_PER_PAGE)
-    ).all()
-    targets = db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
+    items = db.scalars(gen_q.offset((page - 1) * _GENERATED_PER_PAGE).limit(_GENERATED_PER_PAGE)).all()
+    tgt_q = select(TargetChannel).where(TargetChannel.enabled.is_(True))
+    if pid is not None:
+        tgt_q = tgt_q.where(TargetChannel.project_id == pid)
+    targets = db.scalars(tgt_q).all()
     return tpl(request, "generated_posts.html", db, {"items": items, "targets": targets, "page": page, "total_pages": total_pages, "total": total})
 
 
@@ -779,6 +858,71 @@ def settings_save(
             logger.warning("Could not update scheduler interval: %s", exc)
 
     return RedirectResponse(url="/settings", status_code=302)
+
+
+# ── Projects ──────────────────────────────────────────────────────────────────
+
+@router.get("/projects")
+def projects_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None, error: str | None = None):
+    items = db.scalars(select(Project).order_by(Project.name)).all()
+    return tpl(request, "projects.html", db, {"items": items, "ok": ok, "error": error})
+
+
+@router.post("/projects")
+def create_project(
+    request: Request,
+    name: str = Form(...),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    slug = name.lower().replace(" ", "-").replace("_", "-")[:64]
+    existing = db.scalars(select(Project).where(Project.slug == slug)).first()
+    if existing:
+        slug = f"{slug}-{db.scalar(select(func.count()).select_from(Project)) or 0}"
+    project = Project(name=name, slug=slug, enabled=True)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    request.session["current_project_id"] = project.id
+    return RedirectResponse(url="/projects", status_code=302)
+
+
+@router.post("/projects/{project_id}/delete")
+def delete_project(project_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    project = db.get(Project, project_id)
+    if not project:
+        return RedirectResponse(url="/projects", status_code=302)
+    has_sources = db.scalar(select(func.count()).select_from(SourceChannel).where(SourceChannel.project_id == project_id)) or 0
+    has_targets = db.scalar(select(func.count()).select_from(TargetChannel).where(TargetChannel.project_id == project_id)) or 0
+    if has_sources or has_targets:
+        return RedirectResponse(url=f"/projects?error={urllib.parse.quote('Нельзя удалить: в проекте есть источники или каналы')}", status_code=302)
+    db.delete(project)
+    db.commit()
+    if request.session.get("current_project_id") == project_id:
+        request.session.pop("current_project_id", None)
+    return RedirectResponse(url="/projects", status_code=302)
+
+
+@router.post("/projects/{project_id}/rename")
+def rename_project(
+    project_id: int,
+    name: str = Form(...),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    project = db.get(Project, project_id)
+    if project and name.strip():
+        project.name = name.strip()
+        db.commit()
+    return RedirectResponse(url="/projects", status_code=302)
+
+
+@router.post("/switch-project")
+def switch_project(request: Request, project_id: int = Form(...), db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    if db.get(Project, project_id):
+        request.session["current_project_id"] = project_id
+    referer = request.headers.get("referer", "/")
+    return RedirectResponse(url=referer, status_code=302)
 
 
 @router.post("/settings/test-notify")

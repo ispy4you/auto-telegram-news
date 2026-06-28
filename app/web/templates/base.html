@@ -46,6 +46,40 @@
 <div id="sidebar">
   <div class="brand"><i class="bi bi-broadcast me-2 text-primary"></i>TG News</div>
 
+  {# Project switcher #}
+  <div class="dropdown px-2 py-2" style="border-bottom:1px solid #2d3139">
+    <button class="btn btn-sm w-100 text-start d-flex align-items-center justify-content-between"
+      style="background:#2d3139;color:#e0e3ea;border:none;font-size:.82rem"
+      data-bs-toggle="dropdown">
+      <span class="text-truncate me-1">
+        <i class="bi bi-folder2-open me-1 text-primary"></i>
+        {{ current_project.name if current_project else '— проект —' }}
+      </span>
+      <i class="bi bi-chevron-down" style="font-size:.65rem;flex-shrink:0"></i>
+    </button>
+    <ul class="dropdown-menu dropdown-menu-dark w-100" style="min-width:0;font-size:.85rem">
+      {% for p in all_projects %}
+      <li>
+        <form method="post" action="/switch-project" class="m-0">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="project_id" value="{{ p.id }}">
+          <button type="submit" class="dropdown-item d-flex align-items-center gap-2
+            {% if current_project and p.id == current_project.id %}active{% endif %}">
+            {% if current_project and p.id == current_project.id %}
+              <i class="bi bi-check2" style="font-size:.8rem"></i>
+            {% else %}
+              <span style="width:.9rem"></span>
+            {% endif %}
+            {{ p.name }}
+          </button>
+        </form>
+      </li>
+      {% endfor %}
+      <li><hr class="dropdown-divider"></li>
+      <li><a href="/projects" class="dropdown-item"><i class="bi bi-gear me-1"></i>Управление</a></li>
+    </ul>
+  </div>
+
   <nav class="nav flex-column pt-1">
     <a class="nav-link {% if request.url.path == '/' %}active{% endif %}" href="/">
       <i class="bi bi-speedometer2"></i> Дашборд
@@ -69,6 +103,9 @@
     </a>
 
     <div class="section-label">Система</div>
+    <a class="nav-link {% if request.url.path.startswith('/projects') %}active{% endif %}" href="/projects">
+      <i class="bi bi-folder2"></i> Проекты
+    </a>
     <a class="nav-link {% if request.url.path.startswith('/stats') %}active{% endif %}" href="/stats">
       <i class="bi bi-bar-chart-line"></i> Статистика
     </a>

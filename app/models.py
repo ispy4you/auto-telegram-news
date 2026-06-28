@@ -44,10 +44,21 @@ class MediaType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class Project(Base):
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255))
+    slug: Mapped[str] = mapped_column(String(64), unique=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class SourceChannel(Base):
     __tablename__ = "source_channels"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     username: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="telethon")
@@ -67,6 +78,7 @@ class TargetChannel(Base):
     __tablename__ = "target_channels"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(ForeignKey("projects.id"), nullable=True, index=True)
     title: Mapped[str] = mapped_column(String(255))
     chat_id: Mapped[str] = mapped_column(String(255), unique=True)
     username: Mapped[str | None] = mapped_column(String(255), nullable=True)

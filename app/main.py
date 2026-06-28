@@ -26,12 +26,22 @@ with engine.connect() as _conn:
         ("target_channels", "publish_from", "TEXT"),
         ("target_channels", "publish_to", "TEXT"),
         ("generated_posts", "telegram_message_id", "INTEGER"),
+        ("source_channels", "project_id", "INTEGER"),
+        ("target_channels", "project_id", "INTEGER"),
     ]:
         try:
             _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
             _conn.commit()
         except Exception:
             pass
+    # Ensure default project exists and all legacy rows are assigned to it
+    _conn.execute(text(
+        "INSERT OR IGNORE INTO projects (id, name, slug, enabled, created_at) "
+        "VALUES (1, 'Default', 'default', 1, datetime('now'))"
+    ))
+    _conn.execute(text("UPDATE source_channels SET project_id = 1 WHERE project_id IS NULL"))
+    _conn.execute(text("UPDATE target_channels SET project_id = 1 WHERE project_id IS NULL"))
+    _conn.commit()
 
 with SessionLocal() as db:
     ensure_default_prompt_settings(db)

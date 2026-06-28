@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h4 class="fw-semibold mb-0">Проекты</h4>
+</div>
+
+{% if error %}<div class="alert alert-danger alert-dismissible"><i class="bi bi-exclamation-triangle me-2"></i>{{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
+<div class="card mb-4">
+  <div class="card-header bg-white fw-semibold">Создать проект</div>
+  <div class="card-body">
+    <form method="post" action="/projects" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="col-md-5">
+        <label class="form-label small text-muted mb-1">Название проекта</label>
+        <input class="form-control" name="name" placeholder="Мой второй проект" required>
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Создать</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-body p-0">
+    <table class="table table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3">Проект</th>
+          <th>Slug</th>
+          <th>Создан</th>
+          <th class="text-end pe-3">Действия</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in items %}
+        <tr {% if current_project and p.id == current_project.id %}class="table-primary"{% endif %}>
+          <td class="ps-3">
+            <div class="d-flex align-items-center gap-2">
+              <span class="fw-semibold">{{ p.name }}</span>
+              {% if current_project and p.id == current_project.id %}
+              <span class="badge bg-primary">текущий</span>
+              {% endif %}
+            </div>
+          </td>
+          <td class="text-muted small font-monospace">{{ p.slug }}</td>
+          <td class="text-muted small">{{ p.created_at | localdt(display_tz) }}</td>
+          <td class="text-end pe-3">
+            <div class="d-flex gap-1 justify-content-end">
+              {% if not current_project or p.id != current_project.id %}
+              <form method="post" action="/switch-project">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="project_id" value="{{ p.id }}">
+                <button class="btn btn-sm btn-outline-primary"><i class="bi bi-box-arrow-in-right me-1"></i>Переключиться</button>
+              </form>
+              {% endif %}
+              <button class="btn btn-sm btn-outline-secondary"
+                data-bs-toggle="collapse" data-bs-target="#rename-{{ p.id }}">
+                <i class="bi bi-pencil"></i>
+              </button>
+              <form method="post" action="/projects/{{ p.id }}/delete"
+                onsubmit="return confirm('Удалить проект «{{ p.name }}»? Источники и каналы останутся в БД.')">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        <tr class="collapse" id="rename-{{ p.id }}">
+          <td colspan="4" class="py-2 px-3 bg-light">
+            <form method="post" action="/projects/{{ p.id }}/rename" class="d-flex gap-2 align-items-center">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input class="form-control form-control-sm" style="max-width:280px" name="name" value="{{ p.name }}" required>
+              <button class="btn btn-sm btn-primary">Сохранить</button>
+            </form>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted text-center py-4">Проектов нет</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
