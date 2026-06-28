@@ -243,6 +243,30 @@ async def create_source(
     return RedirectResponse(url="/sources", status_code=302)
 
 
+@router.post("/sources/{source_id}/edit")
+async def edit_source(
+    source_id: int,
+    request: Request,
+    title: str = Form(...),
+    username_or_url: str = Form(...),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    source = db.get(SourceChannel, source_id)
+    if source:
+        new_username = TelegramReaderService._extract_username(username_or_url)
+        if new_username != source.username:
+            source.last_message_id = None  # сброс при смене канала
+        source.title = title
+        source.username = new_username
+        source.url = f"https://t.me/{new_username}"
+        db.commit()
+        listener = getattr(request.app.state, "event_listener", None)
+        if listener:
+            await listener.reload_sources()
+    return RedirectResponse(url="/sources?ok=Источник+обновлён", status_code=302)
+
+
 @router.post("/sources/{source_id}/toggle")
 async def toggle_source(source_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     source = db.get(SourceChannel, source_id)
@@ -321,6 +345,24 @@ def create_target(
     ))
     db.commit()
     return RedirectResponse(url="/targets", status_code=302)
+
+
+@router.post("/targets/{target_id}/edit")
+def edit_target(
+    target_id: int,
+    title: str = Form(...),
+    chat_id: str = Form(...),
+    username: str = Form(""),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    target = db.get(TargetChannel, target_id)
+    if target:
+        target.title = title
+        target.chat_id = chat_id.strip()
+        target.username = username.strip().lstrip("@") or None
+        db.commit()
+    return RedirectResponse(url="/targets?ok=Канал+обновлён", status_code=302)
 
 
 @router.post("/targets/{target_id}/schedule")

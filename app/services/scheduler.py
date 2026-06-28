@@ -107,7 +107,11 @@ class SchedulerService:
                 self.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 with SessionLocal() as db:
                     try:
-                        skip_fetch = bool(self.listener and self.listener.is_active)
+                        # Если listener стартовал — никогда не создаём конкурирующий
+                        # Telethon-клиент, даже во время паузы переподключения (30с).
+                        skip_fetch = bool(self.listener and (
+                            self.listener.is_active or getattr(self.listener, "is_started", False)
+                        ))
                         before_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
 
                         await self.pipeline.run_once(db, skip_fetch=skip_fetch)
@@ -127,23 +131,32 @@ class SchedulerService:
                         ))
                         db.commit()
                     except Exception as exc:
-                        from app.services.prompt_settings import _get_setting
-                        if _get_setting(db, "notify_on_error", "false") == "true":
-                            from app.services.notifier import notify_operator
-                            try:
-                                await notify_operator(
-                                    db,
-                                    f"⚠️ <b>Ошибка пайплайна</b>\n\n<code>{type(exc).__name__}: {exc}</code>",
-                                )
-                            except Exception:
-                                pass
-                        db.add(ActionLog(
-                            action="scheduler_error",
-                            entity_type="Scheduler",
-                            entity_id="auto",
-                            message=f"Ошибка: {exc}",
-                        ))
-                        db.commit()
+                        # Сессия может быть в PendingRollbackError после IntegrityError —
+                        # откатываем перед любым дальнейшим использованием.
+                        try:
+                            db.rollback()
+                        except Exception:
+                            pass
+                        try:
+                            from app.services.prompt_settings import _get_setting
+                            if _get_setting(db, "notify_on_error", "false") == "true":
+                                from app.services.notifier import notify_operator
+                                try:
+                                    await notify_operator(
+                                        db,
+                                        f"⚠️ <b>Ошибка пайплайна</b>\n\n<code>{type(exc).__name__}: {exc}</code>",
+                                    )
+                                except Exception:
+                                    pass
+                            db.add(ActionLog(
+                                action="scheduler_error",
+                                entity_type="Scheduler",
+                                entity_id="auto",
+                                message=f"Ошибка: {exc}",
+                            ))
+                            db.commit()
+                        except Exception:
+                            pass
                     finally:
                         self.is_running = False
 

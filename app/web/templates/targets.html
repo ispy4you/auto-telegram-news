@@ -124,6 +124,10 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-info" title="Проверить подключение"><i class="bi bi-broadcast me-1"></i>Тест</button>
               </form>
+              <button class="btn btn-sm btn-outline-secondary" type="button"
+                data-bs-toggle="collapse" data-bs-target="#edit-tgt-{{ t.id }}" title="Редактировать">
+                <i class="bi bi-pencil"></i>
+              </button>
               <form method="post" action="/targets/{{ t.id }}/toggle">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-secondary" title="{{ 'Отключить' if t.enabled else 'Включить' }}">
@@ -135,6 +139,28 @@
                 <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
               </form>
             </div>
+          </td>
+        </tr>
+        <tr class="collapse" id="edit-tgt-{{ t.id }}">
+          <td colspan="7" class="py-2 px-3 bg-light">
+            <form method="post" action="/targets/{{ t.id }}/edit" class="row g-2 align-items-end">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Название</label>
+                <input class="form-control form-control-sm" name="title" value="{{ t.title }}" required>
+              </div>
+              <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Chat ID</label>
+                <input class="form-control form-control-sm font-monospace" name="chat_id" value="{{ t.chat_id }}" required>
+              </div>
+              <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">Username (опц.)</label>
+                <input class="form-control form-control-sm" name="username" value="{{ t.username or '' }}" placeholder="@channel">
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-primary">Сохранить</button>
+              </div>
+            </form>
           </td>
         </tr>
         <tr class="collapse" id="sched-{{ t.id }}">

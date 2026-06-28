@@ -228,6 +228,13 @@ class TelegramReaderService:
 
     def _write_post(self, db: Session, source: SourceChannel, msg, album_messages, media_files: list[dict]):
         """Записывает пост и медиа в DB. Никакого async I/O."""
+        # Повторная проверка дубля: между collect_pending и здесь могла сработать
+        # другая корутина (event listener / параллельный fetch) и вставить тот же пост.
+        if db.scalar(select(RawPost).where(
+            RawPost.source_id == source.id,
+            RawPost.telegram_message_id == msg.id,
+        )):
+            return None
         post = RawPost(
             source_id=source.id,
             telegram_message_id=msg.id,

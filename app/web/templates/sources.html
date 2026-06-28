@@ -74,6 +74,10 @@
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-primary" title="Собрать посты"><i class="bi bi-cloud-download"></i></button>
               </form>
+              <button class="btn btn-sm btn-outline-secondary" type="button"
+                data-bs-toggle="collapse" data-bs-target="#edit-src-{{ s.id }}" title="Редактировать">
+                <i class="bi bi-pencil"></i>
+              </button>
               <form method="post" action="/sources/{{ s.id }}/toggle">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-secondary" title="{{ 'Отключить' if s.enabled else 'Включить' }}">
@@ -85,6 +89,24 @@
                 <button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-trash"></i></button>
               </form>
             </div>
+          </td>
+        </tr>
+        <tr class="collapse" id="edit-src-{{ s.id }}">
+          <td colspan="6" class="py-2 px-3 bg-light">
+            <form method="post" action="/sources/{{ s.id }}/edit" class="row g-2 align-items-end">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <div class="col-md-3">
+                <label class="form-label small text-muted mb-1">Название</label>
+                <input class="form-control form-control-sm" name="title" value="{{ s.title }}" required>
+              </div>
+              <div class="col-md-5">
+                <label class="form-label small text-muted mb-1">Telegram-канал</label>
+                <input class="form-control form-control-sm" name="username_or_url" value="{{ s.username }}" required>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-sm btn-primary">Сохранить</button>
+              </div>
+            </form>
           </td>
         </tr>
         {% else %}

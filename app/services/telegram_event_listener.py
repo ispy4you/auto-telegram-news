@@ -25,6 +25,7 @@ class TelegramEventListenerService:
         self._task: asyncio.Task | None = None
         self._reload_task: asyncio.Task | None = None
         self._active = False
+        self._started = False  # True с момента start() — не сбрасывается при переподключении
         self._db_factory = None
         self._source_usernames: set[str] = set()  # lowercase usernames
         # Буфер для альбомов (grouped_id -> list of (username, msg))
@@ -35,12 +36,21 @@ class TelegramEventListenerService:
     def is_active(self) -> bool:
         return self._active
 
+    @property
+    def is_started(self) -> bool:
+        """True когда listener запущен (включая паузы переподключения).
+        Планировщик использует это чтобы НИКОГДА не создавать конкурирующий
+        Telethon-клиент пока event listener владеет файлом сессии."""
+        return self._started
+
     async def start(self, db_factory) -> None:
         self._db_factory = db_factory
+        self._started = True
         self._task = asyncio.create_task(self._run_loop(), name="tg-event-listener")
         logger.info("TelegramEventListenerService запущен")
 
     async def stop(self) -> None:
+        self._started = False
         self._active = False
         for t in [self._task, self._reload_task]:
             if t and not t.done():
@@ -114,8 +124,11 @@ class TelegramEventListenerService:
                 "Нужна user session: python -m app.cli.init_telegram_session"
             )
 
-        # Обновить список каналов и сделать catch-up
+        # Активируем ДО catch-up — планировщик сразу переходит в режим skip_fetch
         await self.reload_sources()
+        self._active = True
+        logger.info("Event listener активен, слушает %d каналов", len(self._source_usernames))
+
         await self._catchup(client)
 
         # Запустить периодическое обновление списка каналов
@@ -136,32 +149,37 @@ class TelegramEventListenerService:
                     await self._save_single(username, msg, client)
             except Exception as exc:
                 logger.debug("Ошибка в event handler: %s", exc)
-
-        self._active = True
-        logger.info(
-            "Event listener активен, слушает %d каналов",
-            len(self._source_usernames),
-        )
         try:
             await client.run_until_disconnected()
         finally:
             self._active = False
             if client.is_connected():
                 await client.disconnect()
+            # Даём Telethon-задачам (keepalive и др.) время завершиться,
+            # чтобы не конфликтовать с файлом сессии при следующем reconnect.
+            await asyncio.sleep(3)
 
     async def _catchup(self, client) -> None:
         """Подтянуть пропущенные посты для всех источников используя уже подключённый клиент."""
         if not self._db_factory:
             return
+
+        # Получаем список ID в короткой read-сессии
         with self._db_factory() as db:
-            sources = db.scalars(
-                select(SourceChannel).where(
-                    SourceChannel.enabled.is_(True),
-                    SourceChannel.source_type == "telethon",
-                )
-            ).all()
-            for source in sources:
-                if not source.username:
+            source_ids = [
+                s.id for s in db.scalars(
+                    select(SourceChannel).where(
+                        SourceChannel.enabled.is_(True),
+                        SourceChannel.source_type == "telethon",
+                    )
+                ).all() if s.username
+            ]
+
+        # Каждый источник в своей сессии — короткий write-лок вместо одного долгого
+        for source_id in source_ids:
+            with self._db_factory() as db:
+                source = db.get(SourceChannel, source_id)
+                if not source or not source.username:
                     continue
                 try:
                     pending, last_msg_id = await self._reader._collect_pending(
@@ -172,13 +190,17 @@ class TelegramEventListenerService:
                         logger.info("Catch-up @%s: %d новых постов", source.username, count)
                 except Exception as exc:
                     logger.warning("Catch-up ошибка для @%s: %s", source.username, exc)
-                    db.add(ActionLog(
-                        action="event_listener_catchup_error",
-                        entity_type="SourceChannel",
-                        entity_id=str(source.id),
-                        message=str(exc)[:400],
-                    ))
-                    db.commit()
+                    try:
+                        db.rollback()
+                        db.add(ActionLog(
+                            action="event_listener_catchup_error",
+                            entity_type="SourceChannel",
+                            entity_id=str(source_id),
+                            message=str(exc)[:400],
+                        ))
+                        db.commit()
+                    except Exception:
+                        pass
 
     async def _periodic_reload(self) -> None:
         while True:
