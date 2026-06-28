@@ -49,6 +49,31 @@ class SchedulerService:
             except Exception:
                 pass
 
+    async def _process_scheduled_jobs(self, db):
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        due_jobs = db.scalars(
+            select(PublishJob)
+            .where(
+                PublishJob.status == PublishJobStatus.PENDING.value,
+                PublishJob.scheduled_at <= now,
+            )
+        ).all()
+        for job in due_jobs:
+            generated = db.get(GeneratedPost, job.generated_post_id)
+            if not generated or generated.status not in (
+                GeneratedPostStatus.SCHEDULED.value,
+                GeneratedPostStatus.APPROVED.value,
+            ):
+                continue
+            generated.status = GeneratedPostStatus.APPROVED.value
+            target_channel_id = job.target_channel_id
+            db.delete(job)
+            db.flush()
+            try:
+                await self.publisher.publish_generated_post(db, generated.id, target_channel_id)
+            except Exception:
+                pass
+
     async def _safe_run(self):
         if not self._lock.locked():
             async with self._lock:
@@ -61,6 +86,7 @@ class SchedulerService:
 
                         await self.pipeline.run_once(db)
                         await self._retry_failed_jobs(db)
+                        await self._process_scheduled_jobs(db)
 
                         after_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
                         fetched = max(0, after_total - before_total)

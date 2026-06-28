@@ -32,6 +32,14 @@
           <option value="auto">Авто</option>
         </select>
       </div>
+      <div class="col-md-1">
+        <label class="form-label small text-muted mb-1">С</label>
+        <input class="form-control" type="time" name="publish_from" placeholder="09:00">
+      </div>
+      <div class="col-md-1">
+        <label class="form-label small text-muted mb-1">До</label>
+        <input class="form-control" type="time" name="publish_to" placeholder="21:00">
+      </div>
       <div class="col-auto d-flex flex-column gap-1 pt-2">
         <div class="form-check mb-0">
           <input class="form-check-input" type="checkbox" name="enabled" id="t-enabled" checked>
@@ -57,6 +65,7 @@
           <th class="ps-3">Канал</th>
           <th>Chat ID</th>
           <th>Режим</th>
+          <th>Расписание</th>
           <th>Автопубликация</th>
           <th>Статус</th>
           <th class="text-end pe-3">Действия</th>
@@ -83,6 +92,17 @@
                 </button>
               {% endif %}
             </form>
+          </td>
+          <td>
+            {% if t.publish_from and t.publish_to %}
+              <span class="text-primary small"><i class="bi bi-clock me-1"></i>{{ t.publish_from }}–{{ t.publish_to }}</span>
+            {% else %}
+              <span class="text-muted small">круглосуточно</span>
+            {% endif %}
+            <button class="btn btn-link btn-sm p-0 ms-1 text-muted" type="button"
+              data-bs-toggle="collapse" data-bs-target="#sched-{{ t.id }}" title="Изменить расписание">
+              <i class="bi bi-pencil" style="font-size:.75rem"></i>
+            </button>
           </td>
           <td>
             {% if t.auto_publish_enabled %}
@@ -117,8 +137,22 @@
             </div>
           </td>
         </tr>
+        <tr class="collapse" id="sched-{{ t.id }}">
+          <td colspan="7" class="py-2 px-3 bg-light">
+            <form method="post" action="/targets/{{ t.id }}/schedule" class="d-flex align-items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <span class="small text-muted me-1">Окно публикаций:</span>
+              <label class="small text-muted mb-0">с</label>
+              <input type="time" class="form-control form-control-sm" style="width:7rem" name="publish_from" value="{{ t.publish_from or '' }}">
+              <label class="small text-muted mb-0">до</label>
+              <input type="time" class="form-control form-control-sm" style="width:7rem" name="publish_to" value="{{ t.publish_to or '' }}">
+              <span class="small text-muted">(оставьте пустым — круглосуточно)</span>
+              <button type="submit" class="btn btn-sm btn-primary ms-1">Сохранить</button>
+            </form>
+          </td>
+        </tr>
         {% else %}
-        <tr><td colspan="6" class="text-muted text-center py-4">Каналов нет</td></tr>
+        <tr><td colspan="7" class="text-muted text-center py-4">Каналов нет</td></tr>
         {% endfor %}
       </tbody>
     </table>

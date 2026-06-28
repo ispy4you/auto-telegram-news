@@ -73,6 +73,8 @@ class TargetChannel(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_publish_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     default_mode: Mapped[str] = mapped_column(String(16), default="manual")
+    publish_from: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    publish_to: Mapped[str | None] = mapped_column(String(5), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 

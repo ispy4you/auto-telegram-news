@@ -6,6 +6,8 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
+from sqlalchemy import text
+
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
 from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
@@ -18,6 +20,15 @@ settings = get_settings()
 Path("data/media").mkdir(parents=True, exist_ok=True)
 Path("data/telegram_session").mkdir(parents=True, exist_ok=True)
 Base.metadata.create_all(bind=engine)
+
+with engine.connect() as _conn:
+    for _col in ("publish_from", "publish_to"):
+        try:
+            _conn.execute(text(f"ALTER TABLE target_channels ADD COLUMN {_col} TEXT"))
+            _conn.commit()
+        except Exception:
+            pass
+
 with SessionLocal() as db:
     ensure_default_prompt_settings(db)
     from sqlalchemy import select, update

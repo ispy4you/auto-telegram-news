@@ -238,11 +238,44 @@ def create_target(
     enabled: str | None = Form(None),
     auto_publish_enabled: str | None = Form(None),
     default_mode: str = Form("manual"),
+    publish_from: str = Form(""),
+    publish_to: str = Form(""),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    db.add(TargetChannel(title=title, chat_id=chat_id, username=username or None, enabled=_to_bool(enabled), auto_publish_enabled=_to_bool(auto_publish_enabled), default_mode=default_mode))
+    db.add(TargetChannel(
+        title=title,
+        chat_id=chat_id,
+        username=username or None,
+        enabled=_to_bool(enabled),
+        auto_publish_enabled=_to_bool(auto_publish_enabled),
+        default_mode=default_mode,
+        publish_from=publish_from or None,
+        publish_to=publish_to or None,
+    ))
     db.commit()
+    return RedirectResponse(url="/targets", status_code=302)
+
+
+@router.post("/targets/{target_id}/schedule")
+def update_target_schedule(
+    target_id: int,
+    publish_from: str = Form(""),
+    publish_to: str = Form(""),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    target = db.get(TargetChannel, target_id)
+    if target:
+        target.publish_from = publish_from or None
+        target.publish_to = publish_to or None
+        db.add(ActionLog(
+            action="target_schedule_update",
+            entity_type="TargetChannel",
+            entity_id=str(target.id),
+            message=f"Расписание «{target.title}»: {publish_from or '—'} – {publish_to or '—'}",
+        ))
+        db.commit()
     return RedirectResponse(url="/targets", status_code=302)
 
 

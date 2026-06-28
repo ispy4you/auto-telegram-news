@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import zoneinfo
+from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 
 from aiogram import Bot
@@ -7,6 +8,27 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPostStatus, TargetChannel
+
+
+def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
+    tz = zoneinfo.ZoneInfo(tz_name)
+    now = datetime.now(tz).time().replace(second=0, microsecond=0)
+    from_t = time.fromisoformat(publish_from)
+    to_t = time.fromisoformat(publish_to)
+    if from_t <= to_t:
+        return from_t <= now <= to_t
+    # overnight window: e.g. 22:00–06:00
+    return now >= from_t or now <= to_t
+
+
+def _next_window_open_utc(publish_from: str, tz_name: str) -> datetime:
+    tz = zoneinfo.ZoneInfo(tz_name)
+    now = datetime.now(tz)
+    from_t = time.fromisoformat(publish_from)
+    next_open = now.replace(hour=from_t.hour, minute=from_t.minute, second=0, microsecond=0)
+    if next_open <= now:
+        next_open += timedelta(days=1)
+    return next_open.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 class TelegramPublisherService:
@@ -47,6 +69,29 @@ class TelegramPublisherService:
         raw_post = generated.raw_post
         if not raw_post:
             raise ValueError(f"RawPost not found for GeneratedPost {generated_post_id}")
+
+        # Check publish window
+        if target.publish_from and target.publish_to:
+            from app.services.prompt_settings import _get_setting
+            tz_name = _get_setting(db, "display_timezone", "Europe/Moscow")
+            if not _is_within_window(target.publish_from, target.publish_to, tz_name):
+                scheduled_at = _next_window_open_utc(target.publish_from, tz_name)
+                job = PublishJob(
+                    generated_post_id=generated_post_id,
+                    target_channel_id=target_channel_id,
+                    status=PublishJobStatus.PENDING.value,
+                    scheduled_at=scheduled_at,
+                )
+                db.add(job)
+                generated.status = GeneratedPostStatus.SCHEDULED.value
+                db.add(ActionLog(
+                    action="publish_scheduled",
+                    entity_type="GeneratedPost",
+                    entity_id=str(generated.id),
+                    message=f"Отложено до {scheduled_at.strftime('%H:%M')} UTC → {target.chat_id}",
+                ))
+                db.commit()
+                return
 
         bot = self._get_bot()
         job = PublishJob(generated_post_id=generated_post_id, target_channel_id=target_channel_id, status=PublishJobStatus.RUNNING.value, attempts=1)
