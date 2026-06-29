@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -6,11 +7,11 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from sqlalchemy import text
+from sqlalchemy import select, text, update
 
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
-from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
+from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, RawPostStatus
 from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
@@ -22,6 +23,8 @@ Path("data/media").mkdir(parents=True, exist_ok=True)
 Path("data/telegram_session").mkdir(parents=True, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 
+# ── Автомиграции (добавление колонок к существующим таблицам) ─────────────────
+# Совместимо с SQLite и PostgreSQL: ошибка «column already exists» перехватывается.
 with engine.connect() as _conn:
     for _tbl, _col, _typ in [
         ("target_channels", "publish_from", "TEXT"),
@@ -35,19 +38,22 @@ with engine.connect() as _conn:
             _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
             _conn.commit()
         except Exception:
-            pass
-    # Ensure default project exists and all legacy rows are assigned to it
-    _conn.execute(text(
-        "INSERT OR IGNORE INTO projects (id, name, slug, enabled, created_at) "
-        "VALUES (1, 'Default', 'default', 1, datetime('now'))"
-    ))
-    _conn.execute(text("UPDATE source_channels SET project_id = 1 WHERE project_id IS NULL"))
-    _conn.execute(text("UPDATE target_channels SET project_id = 1 WHERE project_id IS NULL"))
-    _conn.commit()
+            _conn.rollback()
+
+# ── Убедиться что дефолтный проект существует (ORM, без диалект-специфичного SQL)
+with SessionLocal() as db:
+    if not db.get(Project, 1):
+        db.add(Project(
+            id=1, name="Default", slug="default", enabled=True,
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
+        ))
+        db.commit()
+    db.execute(text("UPDATE source_channels SET project_id = 1 WHERE project_id IS NULL"))
+    db.execute(text("UPDATE target_channels SET project_id = 1 WHERE project_id IS NULL"))
+    db.commit()
 
 with SessionLocal() as db:
     ensure_default_prompt_settings(db)
-    from sqlalchemy import select, update
     db.execute(
         update(RawPost)
         .where(RawPost.status == RawPostStatus.FAILED.value)

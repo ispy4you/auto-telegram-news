@@ -15,3 +15,4 @@ fastembed
 pytest
 itsdangerous
 PySocks>=1.7.1
+psycopg2-binary

@@ -99,7 +99,7 @@ Production-ready MVP для мониторинга публичных Telegram-�
 | Слой | Библиотеки |
 |---|---|
 | Web | FastAPI, Uvicorn, Jinja2, Bootstrap 5 |
-| База данных | SQLite (WAL), SQLAlchemy 2.x |
+| База данных | PostgreSQL + psycopg2-binary, SQLAlchemy 2.x (SQLite поддерживается для локальной разработки) |
 | Telegram (чтение) | Telethon |
 | Telegram (публикация) | aiogram 3.x |
 | AI | httpx + OpenAI-compatible endpoint |
@@ -113,15 +113,73 @@ Production-ready MVP для мониторинга публичных Telegram-�
 
 ## Установка
 
+### Ubuntu / Debian
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+# 1. Python 3.12+
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3.12-dev git
+
+# 2. PostgreSQL
+sudo apt install -y postgresql postgresql-contrib libpq-dev
+
+# 3. Клонировать проект
+git clone <repo-url> tg-news-mvp
+cd tg-news-mvp
+
+# 4. Окружение
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# 5. Конфиг
+cp .env.example .env
+```
+
+### macOS (локальная разработка)
+
+```bash
+brew install postgresql@17
+echo 'export PATH="/opt/homebrew/opt/postgresql@17/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+brew services start postgresql@17
+
+git clone <repo-url> tg-news-mvp
+cd tg-news-mvp
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
 
 > Семантическая дедупликация требует пакета `fastembed` (уже включён в `requirements.txt`).
 > Модель (~120 МБ) загружается автоматически при первом включении в настройках.
+
+### Создание базы данных PostgreSQL
+
+**Ubuntu:**
+```bash
+sudo -u postgres psql -c "CREATE USER tgnews WITH PASSWORD 'yourpassword';"
+sudo -u postgres psql -c "CREATE DATABASE tgnews OWNER tgnews;"
+```
+
+**macOS (Homebrew, пользователь без пароля):**
+```bash
+createdb tgnews
+```
+
+Пропишите в `.env`:
+```dotenv
+# Ubuntu:
+DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
+# macOS (Homebrew, имя системного пользователя):
+# DATABASE_URL=postgresql://your_macos_username@localhost/tgnews
+```
+
+Таблицы создаются автоматически при первом запуске (`Base.metadata.create_all`).
+
+> SQLite (`sqlite:///./data/app.db`) поддерживается для локальной разработки без PostgreSQL,
+> но не рекомендуется в production из-за ограничений конкурентной записи.
 
 ### Получение TELEGRAM_API_ID и TELEGRAM_API_HASH
 
@@ -165,7 +223,7 @@ ADMIN_PASSWORD=change-me             # обязательно сменить в 
 ADMIN_AUTH_ENABLED=true
 
 # База данных
-DATABASE_URL=sqlite:///./data/app.db
+DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 
 # Telegram
 TELEGRAM_API_ID=
@@ -213,13 +271,53 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### VPS Ubuntu (production)
+### Ubuntu / VPS (production)
 
-1. Установите Python 3.12+, venv, git.
-2. Разверните проект и заполните `.env` с `APP_ENV=production`.
-3. Создайте Telethon-сессию: `python -m app.cli.init_telegram_session`.
-4. Запустите через systemd / PM2 / supervisor.
-5. Откройте админку через SSH-туннель или reverse proxy (nginx) с HTTPS и basic auth.
+```bash
+# 1. Зависимости системы
+sudo apt update
+sudo apt install -y python3.12 python3.12-venv python3.12-dev git postgresql postgresql-contrib libpq-dev
+
+# 2. База данных
+sudo -u postgres psql -c "CREATE USER tgnews WITH PASSWORD 'yourpassword';"
+sudo -u postgres psql -c "CREATE DATABASE tgnews OWNER tgnews;"
+
+# 3. Проект
+git clone <repo-url> /opt/tg-news-mvp
+cd /opt/tg-news-mvp
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# отредактируйте .env: DATABASE_URL, APP_SECRET_KEY, ADMIN_PASSWORD, Telegram-ключи
+
+# 4. Telethon-сессия (один раз, интерактивно)
+python -m app.cli.init_telegram_session
+
+# 5. systemd-сервис
+sudo tee /etc/systemd/system/tgnews.service > /dev/null <<EOF
+[Unit]
+Description=Telegram News Bot
+After=network.target postgresql.service
+
+[Service]
+User=$USER
+WorkingDirectory=/opt/tg-news-mvp
+ExecStart=/opt/tg-news-mvp/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable tgnews
+sudo systemctl start tgnews
+sudo systemctl status tgnews
+```
+
+Откройте админку через SSH-туннель (`ssh -L 8000:127.0.0.1:8000 user@server`) или настройте nginx как reverse proxy с HTTPS.
 
 ---
 
