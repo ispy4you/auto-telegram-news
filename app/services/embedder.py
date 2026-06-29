@@ -4,9 +4,9 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# multilingual-e5-small supports Russian, English and 99 other languages.
-# ~120 MB downloaded once to ~/.cache/fastembed on first use.
-_MODEL_NAME = "intfloat/multilingual-e5-small"
+# paraphrase-multilingual-MiniLM-L12-v2: ~50 languages incl. Russian/English.
+# ~220 MB downloaded once to ~/.cache/fastembed on first use.
+_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 
 _model = None
 _load_attempted = False
@@ -37,8 +37,7 @@ def embed_text(text: str) -> list[float] | None:
     if model is None:
         return None
     try:
-        # fastembed recommends prefixing with "query: " for e5 models
-        vectors = list(model.embed([f"query: {text[:2000]}"]))
+        vectors = list(model.embed([text[:2000]]))
         return [float(x) for x in vectors[0]]
     except Exception as exc:
         logger.debug("embed_text failed: %s", exc)

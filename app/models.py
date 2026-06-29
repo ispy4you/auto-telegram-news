@@ -5,7 +5,7 @@ from enum import Enum
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -63,10 +63,10 @@ class SourceChannel(Base):
     username: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="telethon")
     rss_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
-    telegram_channel_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     url: Mapped[str] = mapped_column(String(512))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_fetched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
@@ -108,8 +108,8 @@ class RawPost(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     source_id: Mapped[int] = mapped_column(ForeignKey("source_channels.id"))
-    telegram_message_id: Mapped[int] = mapped_column(Integer)
-    telegram_grouped_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_message_id: Mapped[int] = mapped_column(BigInteger)
+    telegram_grouped_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     original_text: Mapped[str] = mapped_column(Text, default="")
     normalized_text: Mapped[str] = mapped_column(Text, default="")
@@ -137,7 +137,7 @@ class MediaItem(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     raw_post_id: Mapped[int] = mapped_column(ForeignKey("raw_posts.id"))
-    telegram_message_id: Mapped[int] = mapped_column(Integer)
+    telegram_message_id: Mapped[int] = mapped_column(BigInteger)
     media_type: Mapped[str] = mapped_column(String(16), default=MediaType.UNKNOWN.value)
     file_path: Mapped[str] = mapped_column(String(1024))
     file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -164,7 +164,7 @@ class GeneratedPost(Base):
     status: Mapped[str] = mapped_column(String(16), default=GeneratedPostStatus.DRAFT.value)
     generation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    telegram_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

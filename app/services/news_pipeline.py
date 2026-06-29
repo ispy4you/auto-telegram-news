@@ -28,8 +28,12 @@ class NewsPipelineService:
                     msg = "Telethon: схема TL устарела (Telegram обновил API). Обновите библиотеку."
                 elif len(msg) > 500:
                     msg = msg[:500] + "… [truncated]"
-                db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
-                db.commit()
+                try:
+                    db.rollback()
+                    db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
+                    db.commit()
+                except Exception:
+                    pass
 
     async def process_ready_posts(self, db: Session):
         posts = db.scalars(select(RawPost).where(RawPost.status.in_([RawPostStatus.NEW.value, RawPostStatus.READY.value]))).all()

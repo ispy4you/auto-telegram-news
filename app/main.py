@@ -26,16 +26,32 @@ Base.metadata.create_all(bind=engine)
 # ── Автомиграции (добавление колонок к существующим таблицам) ─────────────────
 # Совместимо с SQLite и PostgreSQL: ошибка «column already exists» перехватывается.
 with engine.connect() as _conn:
+    # Добавление новых колонок (игнорируем если уже есть)
     for _tbl, _col, _typ in [
         ("target_channels", "publish_from", "TEXT"),
         ("target_channels", "publish_to", "TEXT"),
-        ("generated_posts", "telegram_message_id", "INTEGER"),
+        ("generated_posts", "telegram_message_id", "BIGINT"),
         ("source_channels", "project_id", "INTEGER"),
         ("target_channels", "project_id", "INTEGER"),
         ("raw_posts", "embedding", "TEXT"),
     ]:
         try:
             _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
+            _conn.commit()
+        except Exception:
+            _conn.rollback()
+    # Расширяем Integer → BigInteger для колонок с Telegram ID (64-bit значения)
+    _bigint_cols = [
+        ("raw_posts", "telegram_message_id"),
+        ("raw_posts", "telegram_grouped_id"),
+        ("source_channels", "last_message_id"),
+        ("source_channels", "telegram_channel_id"),
+        ("media_items", "telegram_message_id"),
+        ("generated_posts", "telegram_message_id"),
+    ]
+    for _tbl, _col in _bigint_cols:
+        try:
+            _conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN {_col} TYPE BIGINT"))
             _conn.commit()
         except Exception:
             _conn.rollback()
