@@ -1,23 +1,82 @@
 # Telegram News Bot MVP
 
-Production-ready MVP для мониторинга публичных Telegram-каналов через Telethon user session, генерации новостных постов через Timeweb AI Gateway и публикации в целевые Telegram-каналы через Telegram Bot API (aiogram).
+Production-ready MVP для мониторинга публичных Telegram-каналов, генерации новостных постов через AI и публикации в целевые каналы через Telegram Bot API.
+
+---
+
+## Архитектура
+
+```mermaid
+flowchart TD
+    subgraph SRC["📡 Источники (Telegram)"]
+        S1[Channel 1]
+        S2[Channel 2]
+        SN[Channel N ...]
+    end
+
+    subgraph COLLECT["🔄 Сбор контента"]
+        EL["⚡ Event Listener\nTelethon · real-time\nNewMessage handler"]
+        POLL["🕐 Scheduler\nAPScheduler · fallback\nпри потере соединения"]
+    end
+
+    subgraph DB["🗄️ PostgreSQL"]
+        RAW[(raw_posts)]
+        MEDIA[(media_items)]
+        LOGS[(action_logs)]
+    end
+
+    subgraph PIPE["⚙️ Пайплайн обработки"]
+        DEDUP["🔍 Дедупликация\nSHA-256 → rapidfuzz → fastembed\nсемантическое сравнение"]
+        AI["🤖 AI-генерация\nTimeweb AI Gateway\nOpenAI-совместимый API"]
+    end
+
+    subgraph PUB["📤 Публикация"]
+        BOT["🤖 Telegram Bot\naiogram 3.x"]
+        SCHED_PUB["🗓️ Расписание\nвременны́е окна\nпо каналам"]
+    end
+
+    subgraph TGT["📢 Целевые каналы"]
+        T1[Channel A]
+        T2[Channel B]
+    end
+
+    ADMIN["🖥️ Admin UI\nFastAPI · Jinja2 · Bootstrap 5\nlocalhost:8000"]
+
+    S1 & S2 & SN -->|"NewMessage event"| EL
+    S1 & S2 & SN -->|"polling fallback"| POLL
+    EL -->|"сохранить пост + медиа"| RAW
+    POLL -->|"сохранить пост + медиа"| RAW
+    EL & POLL --> MEDIA
+
+    RAW --> DEDUP
+    DEDUP -->|"статус READY"| AI
+    AI -->|"черновик"| BOT
+    BOT --> SCHED_PUB
+    SCHED_PUB --> T1 & T2
+
+    ADMIN <-->|"управление, просмотр, публикация"| DB
+    ADMIN -->|"ручная публикация"| BOT
+    DB --> LOGS
+```
+
+---
 
 ## Возможности
 
 ### Сбор контента
 - Читает посты из любого числа публичных Telegram-каналов через **Telethon user session** — без необходимости быть администратором источника
 - **Режим реального времени**: постоянное Telethon-соединение с обработчиком `NewMessage` — новый пост сохраняется мгновенно, без ожидания следующего тика планировщика
-- **Автоматический catch-up**: при старте приложения (или переподключении) подтягиваются пропущенные сообщения по каждому каналу
-- **Polling как fallback**: планировщик продолжает работать на случай потери соединения; когда event listener активен — шаг fetch пропускается автоматически
+- **Автоматический catch-up**: при старте (или переподключении) подтягиваются пропущенные сообщения по каждому каналу
+- **Polling как fallback**: планировщик продолжает работать при потере соединения; когда event listener активен — шаг fetch пропускается автоматически
 - Автоматическое переподключение при разрыве (пауза 30 с, затем повторная попытка)
 - Инкрементальный сбор: запоминает последнее прочитанное сообщение, не тянет одно и то же дважды
 - Настраиваемый интервал фонового планировщика (30 с — 24 ч, по умолчанию 120 с)
 - Скачивает и сохраняет вложения: фото, видео, документы; корректная обработка альбомов (grouped messages)
 
 ### Дедупликация
-- SHA-256 для мгновенного обнаружения точных копий
-- Нечёткий поиск дублей через **rapidfuzz** с настраиваемым порогом сходства (50–100%, по умолчанию 88%)
-- **Семантическая дедупликация** через **fastembed** (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`): ловит смысловые дубликаты, которые rapidfuzz пропускает («Путин подписал закон» ≈ «Президент подписал документ»). Порог и включение настраиваются в UI; модель ~220 МБ, загружается один раз
+- **SHA-256** — мгновенное обнаружение точных копий
+- **rapidfuzz** — нечёткий поиск дублей с настраиваемым порогом (50–100%, по умолчанию 88%)
+- **fastembed** (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) — семантическая дедупликация: ловит смысловые дубликаты, которые rapidfuzz пропускает («Путин подписал закон» ≈ «Президент подписал документ»). Порог и включение настраиваются в UI; модель ~220 МБ, загружается один раз
 - Нормализация текста перед сравнением: убирает ссылки, пунктуацию, лишние пробелы
 - Окно проверки — 48 часов; эмбеддинги сохраняются в БД для повторного использования
 
@@ -46,7 +105,7 @@ Production-ready MVP для мониторинга публичных Telegram-�
 - Маршруты: задаёте, какой источник идёт в какой канал; если маршрутов нет — посты рассылаются во все активные каналы
 - Автопубликация: полностью автоматический пайплайн без участия оператора
 - Отслеживание заданий публикации с повторными попытками (до 3)
-- **Расписание публикаций**: для каждого целевого канала задаётся временно́е окно (`publish_from` / `publish_to`, часовой пояс). Посты вне окна уходят в очередь и публикуются автоматически при открытии следующего окна
+- **Расписание публикаций**: для каждого целевого канала задаётся временно́е окно (`publish_from` / `publish_to`). Посты вне окна уходят в очередь и публикуются автоматически при открытии следующего окна
 - `telegram_message_id` сохраняется после отправки — для будущего редактирования и аналитики
 
 ### Мультипроектность
@@ -71,20 +130,11 @@ Production-ready MVP для мониторинга публичных Telegram-�
 - График публикаций по дням за последние 30 дней (**Chart.js**)
 - Топ источников по количеству публикаций
 - Детальная сводка по каждому целевому каналу с прогресс-барами
-- Показатель принятия для каждого источника (опубликовано / собрано)
 
 ### Логирование и аудит
 - Полная история всех действий пользователя и системных событий
 - Фильтрация по типу события и тексту
 - Постраничный вывод (100 записей на страницу)
-
-### Настройки
-- Порог дедупликации, интервал сбора, лимит медиа на диске (1–500 МБ)
-- Часовой пояс отображения (по умолчанию Europe/Moscow)
-- Глобальный переключатель автопубликации
-- Кастомные промпты для AI — прямо в UI, без редактирования файлов
-- Порог семантической дедупликации (0 — выключено, рекомендуется 0.85–0.90)
-- Chat ID оператора, порог черновиков для уведомлений, уведомления об ошибках
 
 ### Безопасность
 - Сессионная аутентификация с HMAC-сравнением в constant time
@@ -99,14 +149,14 @@ Production-ready MVP для мониторинга публичных Telegram-�
 | Слой | Библиотеки |
 |---|---|
 | Web | FastAPI, Uvicorn, Jinja2, Bootstrap 5 |
-| База данных | PostgreSQL + psycopg2-binary, SQLAlchemy 2.x (SQLite поддерживается для локальной разработки) |
+| База данных | PostgreSQL + psycopg2-binary, SQLAlchemy 2.x (SQLite — только для локальной разработки) |
 | Telegram (чтение) | Telethon |
 | Telegram (публикация) | aiogram 3.x |
 | AI | httpx + OpenAI-compatible endpoint |
 | Дедупликация | rapidfuzz + fastembed (paraphrase-multilingual-MiniLM-L12-v2) |
 | Планировщик | APScheduler |
 | Безопасность | itsdangerous (CSRF) |
-| Графики | Chart.js (CDN) |
+| Графики | Chart.js |
 | Прокси | PySocks (SOCKS5 / HTTP / MTProxy) |
 
 ---
@@ -116,7 +166,7 @@ Production-ready MVP для мониторинга публичных Telegram-�
 ### Ubuntu / Debian
 
 ```bash
-# 1. Python 3.12+
+# 1. Python 3.12+ и системные зависимости
 sudo apt update
 sudo apt install -y python3.12 python3.12-venv python3.12-dev git
 
@@ -127,13 +177,14 @@ sudo apt install -y postgresql postgresql-contrib libpq-dev
 git clone <repo-url> tg-news-mvp
 cd tg-news-mvp
 
-# 4. Окружение
+# 4. Виртуальное окружение
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # 5. Конфиг
 cp .env.example .env
+# отредактируйте .env
 ```
 
 ### macOS (локальная разработка)
@@ -151,9 +202,6 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
 ```
-
-> Семантическая дедупликация требует пакета `fastembed` (уже включён в `requirements.txt`).
-> Модель (~120 МБ) загружается автоматически при первом включении в настройках.
 
 ### Создание базы данных PostgreSQL
 
@@ -185,7 +233,7 @@ DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 
 1. Перейдите на [my.telegram.org](https://my.telegram.org).
 2. Войдите в аккаунт.
-3. Создайте приложение в разделе API development tools.
+3. Создайте приложение в разделе **API development tools**.
 4. Скопируйте `api_id` и `api_hash` в `.env`.
 
 ### Создание user session (Telethon)
@@ -204,8 +252,8 @@ python -m app.cli.init_telegram_session
 
 ### Добавление бота в целевой канал
 
-1. Откройте настройки канала → Администраторы.
-2. Добавьте бота, выдайте право на публикацию.
+1. Откройте настройки канала → **Администраторы**.
+2. Добавьте бота, выдайте право на публикацию сообщений.
 3. В админке нажмите `Test` у нужного target channel.
 
 ---
@@ -262,16 +310,17 @@ DEFAULT_POST_MODE=manual
 ### Локально
 
 ```bash
+source .venv/bin/activate
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Или напрямую из venv без активации окружения:
+Или без активации окружения:
 
 ```bash
 .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-### Ubuntu / VPS (production)
+### Ubuntu / VPS (production через systemd)
 
 ```bash
 # 1. Зависимости системы
@@ -317,6 +366,22 @@ sudo systemctl start tgnews
 sudo systemctl status tgnews
 ```
 
+### Управление сервисами
+
+```bash
+# Приложение
+sudo systemctl start tgnews
+sudo systemctl stop tgnews
+sudo systemctl restart tgnews
+sudo systemctl status tgnews
+journalctl -u tgnews -f          # логи в реальном времени
+
+# PostgreSQL
+sudo systemctl start postgresql
+sudo systemctl stop postgresql
+sudo systemctl status postgresql
+```
+
 Откройте админку через SSH-туннель (`ssh -L 8000:127.0.0.1:8000 user@server`) или настройте nginx как reverse proxy с HTTPS.
 
 ---
@@ -325,7 +390,7 @@ sudo systemctl status tgnews
 
 1. **Projects** → при необходимости создайте отдельные проекты; переключайтесь через меню в шапке.
 2. **Sources** → добавьте каналы-источники по `@username` или `https://t.me/...`.
-3. **Targets** → добавьте целевые каналы с `chat_id`, проверьте кнопкой `Test`; задайте расписание (временно́е окно публикаций).
+3. **Targets** → добавьте целевые каналы с `chat_id`, проверьте кнопкой `Test`; задайте расписание публикаций.
 4. **Routes** → настройте маршруты: какой источник идёт в какой канал.
 5. **Dashboard** → нажмите «Запустить сбор сейчас» или дождитесь автоматического запуска.
 6. **Posts** → просматривайте новые посты, запускайте AI-генерацию, редактируйте и публикуйте. Используйте `Ctrl+P` для предпросмотра в стиле Telegram.
@@ -344,6 +409,8 @@ sudo systemctl status tgnews
 - `source_channels.project_id` / `target_channels.project_id` — мультипроектность
 - `raw_posts.embedding` — векторный эмбеддинг для семантической дедупликации
 
+Все Telegram ID-колонки (`telegram_message_id`, `telegram_grouped_id`, `last_message_id`, `telegram_channel_id`) автоматически расширяются до `BIGINT` — Telegram использует 64-битные числа, которые не помещаются в стандартный `INTEGER`.
+
 ---
 
 ## Ограничения
@@ -353,7 +420,7 @@ sudo systemctl status tgnews
 - Источники читаются через user session — бот не должен быть администратором источника.
 - Публичные каналы должны быть доступны аккаунту user session.
 - Автопубликацию включайте осторожно: нет дополнительного ревью перед отправкой.
-- Семантическая дедупликация требует ~120 МБ под модель и заметно нагружает CPU. На слабых VPS рекомендуется держать выключенной.
+- Семантическая дедупликация требует ~220 МБ под модель и заметно нагружает CPU. На слабых VPS рекомендуется держать выключенной.
 
 ---
 
