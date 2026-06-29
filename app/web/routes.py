@@ -1146,26 +1146,37 @@ def cleanup_media(
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    if days <= 0:
-        old_items = db.scalars(select(MediaItem)).all()
-        label = "все"
-    else:
-        cutoff = _utcnow() - timedelta(days=days)
-        old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
-        label = f"старше {days} дн."
-
+    media_dir = Path("data/media")
     deleted_files = 0
     freed_bytes = 0
     affected_post_ids: set[int] = set()
 
-    for item in old_items:
-        p = Path(item.file_path)
-        if p.exists():
-            freed_bytes += p.stat().st_size
-            p.unlink(missing_ok=True)
-            deleted_files += 1
-        affected_post_ids.add(item.raw_post_id)
-        db.delete(item)
+    if days <= 0:
+        # Удалить всё: сначала все файлы с диска напрямую, потом все записи из БД
+        if media_dir.exists():
+            for f in media_dir.rglob("*"):
+                if f.is_file():
+                    freed_bytes += f.stat().st_size
+                    f.unlink(missing_ok=True)
+                    deleted_files += 1
+        # Очистить все MediaItem из БД
+        all_items = db.scalars(select(MediaItem)).all()
+        for item in all_items:
+            affected_post_ids.add(item.raw_post_id)
+            db.delete(item)
+        label = "все"
+    else:
+        cutoff = _utcnow() - timedelta(days=days)
+        old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
+        for item in old_items:
+            p = Path(item.file_path)
+            if p.exists():
+                freed_bytes += p.stat().st_size
+                p.unlink(missing_ok=True)
+                deleted_files += 1
+            affected_post_ids.add(item.raw_post_id)
+            db.delete(item)
+        label = f"старше {days} дн."
 
     db.flush()
 
@@ -1189,7 +1200,6 @@ def cleanup_media(
     db.commit()
 
     # Удалить пустые папки
-    media_dir = Path("data/media")
     if media_dir.exists():
         for d in sorted(media_dir.rglob("*"), reverse=True):
             if d.is_dir():
@@ -1198,5 +1208,5 @@ def cleanup_media(
                 except OSError:
                     pass
 
-    msg = f"Удалено {deleted_files} файлов ({freed_mb} МБ)"
+    msg = f"Удалено {deleted_files} файлов, освобождено {freed_mb} МБ"
     return RedirectResponse(url=f"/settings?ok={urllib.parse.quote(msg)}", status_code=302)
