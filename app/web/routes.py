@@ -829,13 +829,26 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
     cfg = {r.key: r.value for r in rows}
     env = get_settings()
     media_dir = Path("data/media")
-    media_size_mb = sum(f.stat().st_size for f in media_dir.rglob("*") if f.is_file()) // 1024 // 1024 if media_dir.exists() else 0
+    disk_files = [f for f in media_dir.rglob("*") if f.is_file()] if media_dir.exists() else []
+    disk_bytes = sum(f.stat().st_size for f in disk_files)
+    from app.models import MediaType as _MT
+    media_stats = {
+        "path": str(media_dir.resolve()),
+        "files": len(disk_files),
+        "size_mb": round(disk_bytes / 1024 / 1024, 1),
+        "size_bytes": disk_bytes,
+        "db_total": db.scalar(select(func.count()).select_from(MediaItem)) or 0,
+        "photos": db.scalar(select(func.count()).select_from(MediaItem).where(MediaItem.media_type == _MT.PHOTO.value)) or 0,
+        "videos": db.scalar(select(func.count()).select_from(MediaItem).where(MediaItem.media_type == _MT.VIDEO.value)) or 0,
+        "docs": db.scalar(select(func.count()).select_from(MediaItem).where(MediaItem.media_type == _MT.DOCUMENT.value)) or 0,
+    }
     return tpl(request, "settings.html", db, {
         "cfg": cfg,
         "env": env,
         "default_system_prompt": get_ai_system_prompt(db),
         "default_user_prompt": get_ai_user_prompt_template(db),
-        "media_size_mb": media_size_mb,
+        "media_size_mb": media_stats["size_mb"],
+        "media_stats": media_stats,
         "ok": ok,
         "current_tz": get_display_timezone(db),
     })
@@ -1133,23 +1146,57 @@ def cleanup_media(
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    cutoff = _utcnow() - timedelta(days=days)
-    old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
+    if days <= 0:
+        old_items = db.scalars(select(MediaItem)).all()
+        label = "все"
+    else:
+        cutoff = _utcnow() - timedelta(days=days)
+        old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
+        label = f"старше {days} дн."
+
     deleted_files = 0
     freed_bytes = 0
+    affected_post_ids: set[int] = set()
+
     for item in old_items:
         p = Path(item.file_path)
         if p.exists():
             freed_bytes += p.stat().st_size
             p.unlink(missing_ok=True)
             deleted_files += 1
+        affected_post_ids.add(item.raw_post_id)
         db.delete(item)
+
+    db.flush()
+
+    # Пересчитать has_media / media_count на затронутых постах
+    for post_id in affected_post_ids:
+        post = db.get(RawPost, post_id)
+        if post:
+            remaining = db.scalar(
+                select(func.count()).select_from(MediaItem).where(MediaItem.raw_post_id == post_id)
+            ) or 0
+            post.media_count = remaining
+            post.has_media = remaining > 0
+
+    freed_mb = round(freed_bytes / 1024 / 1024, 1)
     db.add(ActionLog(
         action="media_cleanup",
         entity_type="MediaItem",
         entity_id="bulk",
-        message=f"Deleted {deleted_files} files, freed {freed_bytes // 1024 // 1024} MB (older than {days} days)",
+        message=f"Удалено {deleted_files} файлов ({freed_mb} МБ), {label}. Обновлено постов: {len(affected_post_ids)}",
     ))
     db.commit()
-    msg = f"Удалено {deleted_files} файлов, освобождено {freed_bytes // 1024 // 1024} МБ"
+
+    # Удалить пустые папки
+    media_dir = Path("data/media")
+    if media_dir.exists():
+        for d in sorted(media_dir.rglob("*"), reverse=True):
+            if d.is_dir():
+                try:
+                    d.rmdir()
+                except OSError:
+                    pass
+
+    msg = f"Удалено {deleted_files} файлов ({freed_mb} МБ)"
     return RedirectResponse(url=f"/settings?ok={urllib.parse.quote(msg)}", status_code=302)
