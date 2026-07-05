@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,8 @@ from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
 from app.services.source_reader import SourceReaderService
 from app.services.telegram_publisher import TelegramPublisherService
+
+logger = logging.getLogger(__name__)
 
 
 class NewsPipelineService:
@@ -33,7 +37,7 @@ class NewsPipelineService:
                     db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
                     db.commit()
                 except Exception:
-                    pass
+                    logger.warning("Failed to record fetch_error ActionLog for source_id=%s", source.id, exc_info=True)
 
     async def process_ready_posts(self, db: Session):
         posts = db.scalars(select(RawPost).where(RawPost.status.in_([RawPostStatus.NEW.value, RawPostStatus.READY.value]))).all()

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -8,6 +9,8 @@ from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost, RawPostStatus
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
+
+logger = logging.getLogger(__name__)
 
 _MAX_RETRY_ATTEMPTS = 3
 _JOB_ID = "main_pipeline"
@@ -49,7 +52,7 @@ class SchedulerService:
             try:
                 await self.publisher.publish_generated_post(db, generated.id, job.target_channel_id)
             except Exception:
-                pass
+                logger.warning("Retry publish failed for generated_post_id=%s", generated.id, exc_info=True)
 
     async def _process_scheduled_jobs(self, db):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -74,7 +77,7 @@ class SchedulerService:
             try:
                 await self.publisher.publish_generated_post(db, generated.id, target_channel_id)
             except Exception:
-                pass
+                logger.warning("Scheduled publish failed for generated_post_id=%s", generated.id, exc_info=True)
 
     async def _check_draft_notification(self, db):
         from app.services.prompt_settings import _get_setting
@@ -131,12 +134,13 @@ class SchedulerService:
                         ))
                         db.commit()
                     except Exception as exc:
+                        logger.exception("Scheduler run failed")
                         # Сессия может быть в PendingRollbackError после IntegrityError —
                         # откатываем перед любым дальнейшим использованием.
                         try:
                             db.rollback()
                         except Exception:
-                            pass
+                            logger.warning("Session rollback failed after scheduler error", exc_info=True)
                         try:
                             from app.services.prompt_settings import _get_setting
                             if _get_setting(db, "notify_on_error", "false") == "true":
@@ -147,7 +151,7 @@ class SchedulerService:
                                         f"⚠️ <b>Ошибка пайплайна</b>\n\n<code>{type(exc).__name__}: {exc}</code>",
                                     )
                                 except Exception:
-                                    pass
+                                    logger.warning("Failed to notify operator about scheduler error", exc_info=True)
                             db.add(ActionLog(
                                 action="scheduler_error",
                                 entity_type="Scheduler",
@@ -156,7 +160,7 @@ class SchedulerService:
                             ))
                             db.commit()
                         except Exception:
-                            pass
+                            logger.warning("Failed to record scheduler_error ActionLog", exc_info=True)
                     finally:
                         self.is_running = False
 

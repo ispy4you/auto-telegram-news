@@ -1,7 +1,11 @@
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.services.prompt_settings import _get_setting
+
+logger = logging.getLogger(__name__)
 
 
 async def notify_operator(db: Session, text: str) -> bool:
@@ -18,6 +22,7 @@ async def notify_operator(db: Session, text: str) -> bool:
         await bot.send_message(chat_id=chat_id.strip(), text=text, parse_mode="HTML")
         return True
     except Exception:
+        logger.warning("Failed to notify operator", exc_info=True)
         return False
     finally:
         await bot.session.close()

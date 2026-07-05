@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +18,8 @@ from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
 from app.web.csrf import CSRFMiddleware
 from app.web.routes import router
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 Path("data/media").mkdir(parents=True, exist_ok=True)
@@ -38,8 +41,10 @@ with engine.connect() as _conn:
         try:
             _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
             _conn.commit()
-        except Exception:
+        except Exception as _exc:
             _conn.rollback()
+            if "already exists" not in str(_exc).lower() and "duplicate column" not in str(_exc).lower():
+                logger.warning("Migration ADD COLUMN %s.%s failed: %s", _tbl, _col, _exc)
     # Расширяем Integer → BigInteger для колонок с Telegram ID (64-bit значения)
     _bigint_cols = [
         ("raw_posts", "telegram_message_id"),
@@ -53,8 +58,9 @@ with engine.connect() as _conn:
         try:
             _conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN {_col} TYPE BIGINT"))
             _conn.commit()
-        except Exception:
+        except Exception as _exc:
             _conn.rollback()
+            logger.debug("Migration ALTER COLUMN %s.%s to BIGINT skipped: %s", _tbl, _col, _exc)
 
 # ── Убедиться что дефолтный проект существует (ORM, без диалект-специфичного SQL)
 with SessionLocal() as db:
