@@ -66,4 +66,6 @@ def get_settings() -> Settings:
             sys.exit("FATAL: APP_SECRET_KEY не задан или равен дефолтному значению. Установите его в .env")
         if s.admin_password == "change_me":
             sys.exit("FATAL: ADMIN_PASSWORD не задан или равен дефолтному значению. Установите его в .env")
+        if s.admin_username == "admin":
+            sys.exit("FATAL: ADMIN_USERNAME не задан или равен дефолтному значению. Установите его в .env")
     return s

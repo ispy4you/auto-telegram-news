@@ -107,11 +107,18 @@ async def lifespan(app: FastAPI):
     scheduler_service.shutdown()
 
 
-app = FastAPI(title="Telegram News Bot Admin", lifespan=lifespan)
+_is_local = settings.app_env == "local"
+app = FastAPI(
+    title="Telegram News Bot Admin",
+    lifespan=lifespan,
+    docs_url="/docs" if _is_local else None,
+    redoc_url="/redoc" if _is_local else None,
+    openapi_url="/openapi.json" if _is_local else None,
+)
 # Middleware order: last-added runs first (outermost). Session must run before CSRF.
 # So we add CSRF first (inner), then Session (outer).
 app.add_middleware(CSRFMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=settings.app_secret_key)
+app.add_middleware(SessionMiddleware, secret_key=settings.app_secret_key, https_only=not _is_local)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 # /media is served via an authenticated route in routes.py — not a public StaticFiles mount.
 app.include_router(router)
