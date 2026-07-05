@@ -7,10 +7,12 @@ from app.web.auth import require_auth
 
 router = APIRouter()
 
+MEDIA_ROOT = Path("data/media").resolve()
+
 
 @router.get("/media/{path:path}")
 def serve_media(path: str, _: bool = Depends(require_auth)):
-    file = Path("data/media") / path
-    if not file.is_file():
+    file = (MEDIA_ROOT / path).resolve()
+    if MEDIA_ROOT not in file.parents or not file.is_file():
         raise HTTPException(status_code=404)
     return FileResponse(file)
