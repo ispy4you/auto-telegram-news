@@ -20,6 +20,15 @@ from app.services.telegram_login import TelegramLoginService
 from app.web.csrf import CSRFMiddleware
 from app.web.routes import router
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+# Библиотеки логируют довольно шумно на INFO — приглушаем, оставляя WARNING+.
+logging.getLogger("telethon").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 settings = get_settings()

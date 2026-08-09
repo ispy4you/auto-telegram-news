@@ -244,6 +244,12 @@ class TelegramEventListenerService:
             if post:
                 source.last_message_id = max(source.last_message_id or 0, msg.id)
                 source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.add(ActionLog(
+                    action="fetch_post_telethon",
+                    entity_type="RawPost",
+                    entity_id=str(post.id),
+                    message=f"Новый пост из @{username}",
+                ))
                 db.commit()
                 logger.debug("Event: пост %d из @%s", msg.id, username)
 
@@ -271,6 +277,12 @@ class TelegramEventListenerService:
             if post:
                 source.last_message_id = max(source.last_message_id or 0, max(m.id for m in msgs))
                 source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                db.add(ActionLog(
+                    action="fetch_post_telethon",
+                    entity_type="RawPost",
+                    entity_id=str(post.id),
+                    message=f"Новый альбом из @{username} ({len(media_files)} медиа)",
+                ))
                 db.commit()
                 logger.debug(
                     "Event: альбом %d из @%s (%d медиа)",
