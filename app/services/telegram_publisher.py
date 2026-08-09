@@ -35,10 +35,19 @@ class TelegramPublisherService:
     def __init__(self):
         self.settings = get_settings()
         self._bot: Bot | None = None
+        self._bot_token: str | None = None
 
-    def _get_bot(self) -> Bot:
+    async def _get_bot(self, db: Session | None = None) -> Bot:
+        from app.services.prompt_settings import _get_setting
+        token = _get_setting(db, "telegram_bot_token", self.settings.telegram_bot_token or "")
+        if not token:
+            raise RuntimeError("TELEGRAM_BOT_TOKEN не задан ни в Settings, ни в .env")
+        if self._bot is not None and self._bot_token != token:
+            await self._bot.session.close()
+            self._bot = None
         if self._bot is None:
-            self._bot = Bot(self.settings.telegram_bot_token)
+            self._bot = Bot(token)
+            self._bot_token = token
         return self._bot
 
     async def close(self):
@@ -46,8 +55,8 @@ class TelegramPublisherService:
             await self._bot.session.close()
             self._bot = None
 
-    async def test_target(self, chat_id: str) -> tuple[bool, str]:
-        bot = self._get_bot()
+    async def test_target(self, chat_id: str, db: Session | None = None) -> tuple[bool, str]:
+        bot = await self._get_bot(db)
         try:
             me = await bot.get_me()
             member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
@@ -93,7 +102,7 @@ class TelegramPublisherService:
                 db.commit()
                 return
 
-        bot = self._get_bot()
+        bot = await self._get_bot(db)
         job = PublishJob(generated_post_id=generated_post_id, target_channel_id=target_channel_id, status=PublishJobStatus.RUNNING.value, attempts=1)
         db.add(job)
         db.flush()

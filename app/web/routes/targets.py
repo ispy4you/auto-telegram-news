@@ -139,7 +139,7 @@ async def test_target(target_id: int, db: Session = Depends(get_db), _: bool = D
         return RedirectResponse(url="/targets?error=Target+not+found", status_code=302)
     publisher = TelegramPublisherService()
     try:
-        ok, msg = await publisher.test_target(target.chat_id)
+        ok, msg = await publisher.test_target(target.chat_id, db)
     finally:
         await publisher.close()
     db.add(ActionLog(action="target_test", entity_type="TargetChannel", entity_id=str(target.id), message=f"ok={ok}: {msg}"))

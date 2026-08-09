@@ -17,4 +17,9 @@ class MediaStorageService:
     def validate_size(self, file_size: int | None) -> bool:
         if not file_size:
             return True
-        return file_size <= self.settings.max_media_mb * 1024 * 1024
+        from app.services.prompt_settings import _get_setting
+        try:
+            max_mb = int(_get_setting(None, "max_media_mb", str(self.settings.max_media_mb)))
+        except (ValueError, TypeError):
+            max_mb = self.settings.max_media_mb
+        return file_size <= max_mb * 1024 * 1024

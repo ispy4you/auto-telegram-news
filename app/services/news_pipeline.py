@@ -25,7 +25,7 @@ class NewsPipelineService:
         sources = db.scalars(select(SourceChannel).where(SourceChannel.enabled.is_(True))).all()
         for source in sources:
             try:
-                await self.reader.fetch_source(db, source, self.settings.default_lookback_limit)
+                await self.reader.fetch_source(db, source)
             except Exception as exc:
                 msg = str(exc)
                 if "Constructor ID" in msg and "TLObject" in msg:
@@ -71,7 +71,7 @@ class NewsPipelineService:
                 db.commit()
                 continue
 
-            result = await self.ai_client.generate_news_post(post)
+            result = await self.ai_client.generate_news_post(post, db)
             if not result.suitable or not result.text.strip():
                 post.status = RawPostStatus.REJECTED.value
                 post.ai_suitable = False
