@@ -236,6 +236,32 @@ beyond local testing, since `docker-compose.yml` builds `DATABASE_URL` from thes
 
 To stop: `docker compose down` (add `-v` to also wipe the database volume).
 
+### Deploy to Timeweb Cloud (hosted, RUB billing)
+
+Want this running somewhere other than your own machine, but Railway/Render/Fly.io are a
+non-starter because they require a non-Russian card? [Timeweb Cloud](https://timeweb.cloud) bills
+in RUB/SBP/Mir and works well for this project.
+
+**Option 1: Cloud Server (VPS) — recommended.** A regular VPS runs `docker-compose.yml` unmodified,
+including the bind-mounted volumes that keep the Telegram session and media across restarts.
+Create a server under **Cloud Servers** (pick a "Docker" marketplace image so Docker is
+preinstalled), SSH in, and follow [Quick start with Docker](#quick-start-with-docker-recommended)
+above. Put a domain + reverse proxy (nginx/Caddy) with HTTPS in front of port `8000`, same as
+described for the systemd setup in [Managing services](#managing-services).
+
+**Option 2: App Platform (Timeweb Cloud Apps) — no server to manage.** Timeweb's PaaS deploys
+straight from this repo's `Dockerfile` (it already `EXPOSE`s port 8000), with a free domain, HTTPS,
+and a separate managed PostgreSQL add-on. There's no embeddable one-click deploy link for it (unlike
+Railway) — instead: connect your GitHub fork under **Apps**, deploy from Dockerfile, set the health
+check path to `/healthz`, create a managed Postgres and put its connection string in `DATABASE_URL`,
+then set `APP_SECRET_KEY`, `ADMIN_PASSWORD`, and anything else from
+[Configuration](#configuration-env) as environment variables and deploy.
+
+> **Caveat:** App Platform's container filesystem isn't guaranteed to persist across redeploys, so
+> the Telegram session and any media pending publish can be lost when you redeploy — you'd just log
+> back in via **Settings → Telegram account** afterward. Fine if you deploy once and rarely touch it
+> again; the VPS option has no such limitation.
+
 ### Manual installation
 
 Prefer running it directly with your own Python/PostgreSQL instead of Docker? See below.
