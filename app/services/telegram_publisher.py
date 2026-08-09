@@ -93,6 +93,7 @@ class TelegramPublisherService:
                 )
                 db.add(job)
                 generated.status = GeneratedPostStatus.SCHEDULED.value
+                generated.target_channel_id = target_channel_id
                 db.add(ActionLog(
                     action="publish_scheduled",
                     entity_type="GeneratedPost",
@@ -147,6 +148,7 @@ class TelegramPublisherService:
             generated.status = GeneratedPostStatus.PUBLISHED.value
             generated.telegram_message_id = sent_msg_id
             generated.published_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            generated.target_channel_id = target_channel_id
             raw_post.status = RawPostStatus.PUBLISHED.value
             job.status = PublishJobStatus.SUCCESS.value
             db.add(ActionLog(action="publish_success", entity_type="GeneratedPost", entity_id=str(generated.id), message=f"Published to {target.chat_id}"))
