@@ -106,6 +106,8 @@ flowchart TD
 - Incremental collection: remembers the last-read message per channel, never re-fetches the same
   post twice.
 - Configurable background scheduler interval (30s – 24h, default 120s).
+- Age cutoff for collection (default 24h, configurable): after a long downtime, old backlog posts
+  are skipped instead of flooding the pipeline with stale news.
 - Downloads and stores attachments: photos, videos, documents; correctly handles albums (grouped
   messages).
 

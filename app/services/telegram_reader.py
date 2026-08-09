@@ -1,6 +1,7 @@
 import asyncio
+import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sqlalchemy import select
@@ -11,6 +12,8 @@ from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 from app.config import get_settings
 from app.models import ActionLog, MediaItem, MediaType, RawPost, SourceChannel
 from app.services.media_storage import MediaStorageService
+
+logger = logging.getLogger(__name__)
 
 # Глобальный лок — только один Telethon-клиент работает в любой момент времени,
 # чтобы не было конкурентного доступа к SQLite-файлу сессии.
@@ -127,6 +130,20 @@ class TelegramReaderService:
 
         return self._flush_pending(db, source, pending, last_msg_id)
 
+    @staticmethod
+    def _max_post_age_cutoff(db: Session) -> datetime | None:
+        """Посты старше этого момента игнорируются при сборе (не тянем недельный
+        бэклог после долгого простоя). 0 в настройках — отключить отсечку."""
+        from app.services.prompt_settings import _get_setting
+
+        try:
+            max_age_hours = float(_get_setting(db, "max_post_age_hours", "24"))
+        except (ValueError, TypeError):
+            max_age_hours = 24.0
+        if max_age_hours <= 0:
+            return None
+        return datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+
     async def _collect_pending(
         self, client: TelegramClient, db: Session, source: SourceChannel, limit: int
     ) -> tuple[list[dict], int | None]:
@@ -152,8 +169,13 @@ class TelegramReaderService:
                 standalone_messages.append(msg)
 
         pending: list[dict] = []
+        cutoff = self._max_post_age_cutoff(db)
+        skipped_old = 0
 
         for msg in standalone_messages:
+            if cutoff and msg.date and msg.date < cutoff:
+                skipped_old += 1
+                continue
             if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_message_id == msg.id)):
                 continue
             media_files = await self._download_media_list(source, msg.id, [msg], client)
@@ -161,10 +183,17 @@ class TelegramReaderService:
 
         for grouped_id in albums:
             grouped_messages = sorted(albums[grouped_id], key=lambda m: m.id)
+            anchor = grouped_messages[0]
+            if cutoff and anchor.date and anchor.date < cutoff:
+                skipped_old += 1
+                continue
             if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_grouped_id == grouped_id)):
                 continue
             media_files = await self._download_media_list(source, grouped_messages[0].id, grouped_messages, client)
             pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
+
+        if skipped_old:
+            logger.debug("Пропущено %d старых постов (старше отсечки) у @%s", skipped_old, source.username)
 
         last_msg_id = max((m.id for m in messages), default=None)
         return pending, last_msg_id
@@ -182,6 +211,15 @@ class TelegramReaderService:
         source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
         if last_msg_id:
             source.last_message_id = last_msg_id
+        if new_count:
+            # Одна запись на весь батч, а не на каждый пост — иначе лог захлёбывается
+            # после долгого простоя (сотни постов = сотни строк "Fetched from @...").
+            db.add(ActionLog(
+                action="fetch_post_telethon",
+                entity_type="SourceChannel",
+                entity_id=str(source.id),
+                message=f"Собрано {new_count} новых постов из @{source.username}",
+            ))
         db.commit()
         return new_count
 
@@ -268,6 +306,5 @@ class TelegramReaderService:
                 sort_order=mf["sort_order"],
             ))
 
-        db.add(ActionLog(action="fetch_post_telethon", entity_type="RawPost", entity_id=str(post.id), message=f"Fetched from @{source.username}"))
         return post
 

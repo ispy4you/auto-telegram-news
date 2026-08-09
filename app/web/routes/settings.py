@@ -59,6 +59,7 @@ def settings_save(
     duplicate_threshold: str = Form("88"),
     fetch_interval_seconds: str = Form("120"),
     max_media_mb: str = Form("50"),
+    max_post_age_hours: str = Form("24"),
     display_timezone: str = Form("Europe/Moscow"),
     ai_system_prompt: str = Form(""),
     ai_prompt_template: str = Form(""),
@@ -82,6 +83,10 @@ def settings_save(
         media_mb = max(1, min(500, int(max_media_mb)))
     except (ValueError, TypeError):
         media_mb = 50
+    try:
+        post_age_hours = max(0, min(8760, float(max_post_age_hours)))
+    except (ValueError, TypeError):
+        post_age_hours = 24.0
 
     try:
         ZoneInfo(display_timezone)
@@ -97,6 +102,7 @@ def settings_save(
         "duplicate_threshold": str(threshold),
         "fetch_interval_seconds": str(interval),
         "max_media_mb": str(media_mb),
+        "max_post_age_hours": "%g" % post_age_hours,
         "display_timezone": display_timezone,
         "ai_system_prompt": ai_system_prompt,
         "ai_prompt_template": ai_prompt_template,
