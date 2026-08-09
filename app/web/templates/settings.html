@@ -39,6 +39,15 @@
           </div>
 
           <div class="col-md-4">
+            <label class="form-label">Не собирать посты старше <span class="text-muted fw-normal">(часов)</span></label>
+            <input class="form-control" name="max_post_age_hours" value="{{ cfg.get('max_post_age_hours', '24') }}">
+            <div class="form-text text-muted">0 — без ограничения по возрасту</div>
+            {% if 'max_post_age_hours' in cfg %}
+            <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД</div>
+            {% endif %}
+          </div>
+
+          <div class="col-md-4">
             <label class="form-label">Макс. размер медиа <span class="text-muted fw-normal">(МБ)</span></label>
             <input class="form-control" name="max_media_mb" value="{{ cfg.get('max_media_mb', env.max_media_mb) }}">
             {% if 'max_media_mb' not in cfg %}
@@ -267,8 +276,12 @@
     <p class="text-muted mb-2">Учётная запись, через которую бот читает публичные каналы-источники (не bot-токен).</p>
 
     <div id="tg-login-idle">
+      <div id="tg-login-connected" class="d-none alert alert-success py-2 px-3 mb-2 d-flex align-items-center gap-2">
+        <i class="bi bi-check-circle-fill"></i>
+        <span>Аккаунт подключён и активно слушает источники — повторный вход не требуется.</span>
+      </div>
       <button type="button" class="btn btn-outline-primary btn-sm" id="tg-login-open-btn">
-        <i class="bi bi-box-arrow-in-right me-1"></i>Войти / переподключить
+        <i class="bi bi-box-arrow-in-right me-1"></i><span id="tg-login-open-btn-label">Войти</span>
       </button>
     </div>
 
@@ -327,6 +340,8 @@
   const passwordStep = document.getElementById('tg-login-password-step');
   const phoneStep = document.getElementById('tg-login-phone-step');
   const codeStep = document.getElementById('tg-login-code-step');
+  const connectedBox = document.getElementById('tg-login-connected');
+  const openBtnLabel = document.getElementById('tg-login-open-btn-label');
   let pollTimer = null;
   let currentMethod = 'qr';
 
@@ -365,6 +380,8 @@
     if (d.state === 'idle' || d.state === 'done' || d.state === 'error') {
       panel.classList.add('d-none');
       idleBox.classList.remove('d-none');
+      connectedBox.classList.toggle('d-none', !d.listener_active);
+      openBtnLabel.textContent = d.listener_active ? 'Переподключить / сменить аккаунт' : 'Войти';
       stopPolling();
       return;
     }
