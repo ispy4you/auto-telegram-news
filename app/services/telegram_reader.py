@@ -281,7 +281,12 @@ class TelegramReaderService:
             original_text=(msg.message or "").strip(),
             normalized_text="",
             text_hash="",
-            published_at_source=msg.date,
+            # msg.date is tz-aware UTC; the column is TIMESTAMP WITHOUT TIME ZONE, and
+            # psycopg2 silently converts aware datetimes to the session's TimeZone
+            # (server locale, e.g. Europe/Moscow) before dropping tzinfo — so we must
+            # strip it ourselves first, or the stored value ends up shifted by the
+            # server's UTC offset instead of being naive UTC like every other timestamp.
+            published_at_source=msg.date.astimezone(timezone.utc).replace(tzinfo=None) if msg.date else None,
             has_media=bool(media_files),
             media_count=len(media_files),
         )
