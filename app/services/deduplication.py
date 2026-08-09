@@ -62,16 +62,21 @@ class DeduplicationService:
         ).all()
 
         # Phase 2: rapidfuzz lexical similarity
+        from app.services.prompt_settings import _get_setting
+        try:
+            threshold = int(_get_setting(db, "duplicate_threshold", str(self.threshold)))
+        except (ValueError, TypeError):
+            threshold = self.threshold
+
         for candidate in candidates:
             score = fuzz.token_set_ratio(post.normalized_text, candidate.normalized_text or "")
-            if score >= self.threshold:
+            if score >= threshold:
                 post.status = RawPostStatus.DUPLICATE.value
                 post.duplicate_of_id = candidate.id
                 post.dedupe_score = float(score)
                 return post
 
         # Phase 3: semantic similarity (optional, requires fastembed)
-        from app.services.prompt_settings import _get_setting
         try:
             semantic_threshold = float(_get_setting(db, "semantic_threshold", "0"))
         except (ValueError, TypeError):
