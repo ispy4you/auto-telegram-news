@@ -59,20 +59,29 @@ docker compose up -d --build
 
 ## Pull request workflow
 
+`main` is protected — every change, including the maintainer's own, goes through a PR. Direct
+pushes to `main` aren't possible even for repo admins.
+
 1. Fork the repo and create a branch off `main` (`git checkout -b fix/short-description`).
 2. Keep the PR focused — one bug or one feature per PR. Smaller PRs get reviewed faster.
 3. Add or update tests for the behavior you changed, when practical.
-4. Make sure `pytest` passes locally before opening the PR — CI runs it automatically on every PR.
-5. Write a clear PR description: what changed and why. Link the issue it closes with
+4. Make sure `pytest` passes locally before opening the PR — CI runs it automatically on every PR,
+   and the PR can't be merged until it's green.
+5. **Give the PR a title in [Conventional Commits](#commit-message-format) format** — PRs are
+   merged with **squash merge only**, and the PR title becomes the single commit message that
+   lands on `main`. That's what `release-please` reads to build the changelog and version bump, so
+   the individual commits inside your branch don't need to be clean — only the PR title does.
+6. Write a clear PR description: what changed and why. Link the issue it closes with
    `Closes #123` if there is one.
-6. Be responsive to review comments. If a change requires a design discussion, say so — it's fine
+7. Be responsive to review comments. If a change requires a design discussion, say so — it's fine
    to pause a PR and take the discussion to the linked issue.
 
 ## Commit message format
 
 Versioning and `CHANGELOG.md` are generated automatically by
-[release-please](https://github.com/googleapis/release-please) from commit messages, so please
-use [Conventional Commits](https://www.conventionalcommits.org/):
+[release-please](https://github.com/googleapis/release-please) from commit messages on `main`.
+Since PRs are squash-merged, that means **the PR title** — please use
+[Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
 <type>: <short summary>
