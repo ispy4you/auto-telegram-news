@@ -35,32 +35,52 @@ class AiGatewayClient:
         )
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
+    def _resolve(self, db: Session | None, key: str, env_value) -> str:
+        from app.services.prompt_settings import _get_setting
+        return _get_setting(db, key, str(env_value) if env_value is not None else "")
+
     async def generate_news_post(self, raw_post: RawPost, db: Session | None = None) -> AiResult:
-        if not self.settings.timeweb_ai_gateway_base_url or not self.settings.timeweb_ai_gateway_api_key:
-            return AiResult(False, "", "AI gateway не настроен", self.settings.timeweb_ai_gateway_model or "")
+        base_url = self._resolve(db, "timeweb_ai_gateway_base_url", self.settings.timeweb_ai_gateway_base_url)
+        api_key = self._resolve(db, "timeweb_ai_gateway_api_key", self.settings.timeweb_ai_gateway_api_key)
+        model = self._resolve(db, "timeweb_ai_gateway_model", self.settings.timeweb_ai_gateway_model)
+        if not base_url or not api_key:
+            return AiResult(False, "", "AI gateway не настроен", model)
+
+        try:
+            temperature = float(self._resolve(db, "ai_temperature", self.settings.ai_temperature))
+        except (ValueError, TypeError):
+            temperature = self.settings.ai_temperature
+        try:
+            max_tokens = int(self._resolve(db, "ai_max_tokens", self.settings.ai_max_tokens))
+        except (ValueError, TypeError):
+            max_tokens = self.settings.ai_max_tokens
+        try:
+            timeout_seconds = int(self._resolve(db, "ai_timeout_seconds", self.settings.ai_timeout_seconds))
+        except (ValueError, TypeError):
+            timeout_seconds = self.settings.ai_timeout_seconds
 
         headers = {
-            "Authorization": f"Bearer {self.settings.timeweb_ai_gateway_api_key}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload = {
-            "model": self.settings.timeweb_ai_gateway_model,
+            "model": model,
             "messages": self._build_messages(raw_post, db),
-            "temperature": self.settings.ai_temperature,
-            "max_tokens": self.settings.ai_max_tokens,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},
         }
 
-        async with httpx.AsyncClient(timeout=self.settings.ai_timeout_seconds) as client:
-            resp = await client.post(self.settings.timeweb_ai_gateway_base_url.rstrip("/") + "/chat/completions", headers=headers, json=payload)
+        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+            resp = await client.post(base_url.rstrip("/") + "/chat/completions", headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
 
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         parsed = self._parse_json(content)
         if parsed is None:
-            return AiResult(False, "", f"AI вернул не-JSON ответ: {content[:300]}", self.settings.timeweb_ai_gateway_model or "")
-        return AiResult(bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""), self.settings.timeweb_ai_gateway_model or "")
+            return AiResult(False, "", f"AI вернул не-JSON ответ: {content[:300]}", model)
+        return AiResult(bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""), model)
 
     @staticmethod
     def _parse_json(content: str) -> dict | None:

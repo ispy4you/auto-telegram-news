@@ -50,69 +50,139 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
         "media_stats": media_stats,
         "ok": ok,
         "current_tz": get_display_timezone(db),
+        "bot_token_set": bool(cfg.get("telegram_bot_token") or env.telegram_bot_token),
+        "ai_key_set": bool(cfg.get("timeweb_ai_gateway_api_key") or env.timeweb_ai_gateway_api_key),
     })
 
 
 @router.post("/settings")
 def settings_save(
     request: Request,
-    duplicate_threshold: str = Form("88"),
-    fetch_interval_seconds: str = Form("120"),
-    max_media_mb: str = Form("50"),
-    max_post_age_hours: str = Form("24"),
-    display_timezone: str = Form("Europe/Moscow"),
-    ai_system_prompt: str = Form(""),
-    ai_prompt_template: str = Form(""),
+    # Regular fields: None means the key was missing from the POST body entirely
+    # (e.g. a malformed/partial request) — skipped rather than saved as blank, so
+    # a bad request can't silently wipe a setting. A real browser submission
+    # always includes every field, even ones the user left empty.
+    duplicate_threshold: str | None = Form(None),
+    fetch_interval_seconds: str | None = Form(None),
+    max_media_mb: str | None = Form(None),
+    max_post_age_hours: str | None = Form(None),
+    default_lookback_limit: str | None = Form(None),
+    display_timezone: str | None = Form(None),
+    ai_system_prompt: str | None = Form(None),
+    ai_prompt_template: str | None = Form(None),
+    operator_chat_id: str | None = Form(None),
+    notify_draft_threshold: str | None = Form(None),
+    semantic_threshold: str | None = Form(None),
+    timeweb_ai_gateway_base_url: str | None = Form(None),
+    timeweb_ai_gateway_model: str | None = Form(None),
+    ai_temperature: str | None = Form(None),
+    ai_max_tokens: str | None = Form(None),
+    ai_timeout_seconds: str | None = Form(None),
+    # Secrets: blank means "leave unchanged" (the form never re-renders the real
+    # value), on top of the same missing-key skip as above.
+    telegram_bot_token: str | None = Form(None),
+    timeweb_ai_gateway_api_key: str | None = Form(None),
+    # Checkboxes: browsers omit unchecked boxes entirely, so absence here means
+    # "unchecked", not "not submitted" — always written, unlike the fields above.
     global_auto_publish_enabled: str | None = Form(None),
-    operator_chat_id: str = Form(""),
     notify_on_error: str | None = Form(None),
-    notify_draft_threshold: str = Form("0"),
-    semantic_threshold: str = Form("0"),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    try:
-        threshold = max(50, min(100, int(duplicate_threshold)))
-    except (ValueError, TypeError):
-        threshold = 88
-    try:
-        interval = max(30, min(86400, int(fetch_interval_seconds)))
-    except (ValueError, TypeError):
-        interval = 120
-    try:
-        media_mb = max(1, min(500, int(max_media_mb)))
-    except (ValueError, TypeError):
-        media_mb = 50
-    try:
-        post_age_hours = max(0, min(8760, float(max_post_age_hours)))
-    except (ValueError, TypeError):
-        post_age_hours = 24.0
-
-    try:
-        ZoneInfo(display_timezone)
-    except (ZoneInfoNotFoundError, Exception):
-        display_timezone = "Europe/Moscow"
-
-    try:
-        draft_threshold = max(0, int(notify_draft_threshold))
-    except (ValueError, TypeError):
-        draft_threshold = 0
-
-    values = {
-        "duplicate_threshold": str(threshold),
-        "fetch_interval_seconds": str(interval),
-        "max_media_mb": str(media_mb),
-        "max_post_age_hours": "%g" % post_age_hours,
-        "display_timezone": display_timezone,
-        "ai_system_prompt": ai_system_prompt,
-        "ai_prompt_template": ai_prompt_template,
+    values: dict[str, str] = {
         "global_auto_publish_enabled": "true" if to_bool(global_auto_publish_enabled) else "false",
-        "operator_chat_id": operator_chat_id.strip(),
         "notify_on_error": "true" if to_bool(notify_on_error) else "false",
-        "notify_draft_threshold": str(draft_threshold),
-        "semantic_threshold": str(max(0.0, min(1.0, float(semantic_threshold or 0)))),
         "updated_at": utcnow().isoformat(),
     }
+
+    if duplicate_threshold is not None:
+        try:
+            values["duplicate_threshold"] = str(max(50, min(100, int(duplicate_threshold))))
+        except (ValueError, TypeError):
+            values["duplicate_threshold"] = "88"
+
+    interval = None
+    if fetch_interval_seconds is not None:
+        try:
+            interval = max(30, min(86400, int(fetch_interval_seconds)))
+        except (ValueError, TypeError):
+            interval = 120
+        values["fetch_interval_seconds"] = str(interval)
+
+    if max_media_mb is not None:
+        try:
+            values["max_media_mb"] = str(max(1, min(500, int(max_media_mb))))
+        except (ValueError, TypeError):
+            values["max_media_mb"] = "50"
+
+    if max_post_age_hours is not None:
+        try:
+            values["max_post_age_hours"] = "%g" % max(0, min(8760, float(max_post_age_hours)))
+        except (ValueError, TypeError):
+            values["max_post_age_hours"] = "24"
+
+    if default_lookback_limit is not None:
+        try:
+            values["default_lookback_limit"] = str(max(1, min(500, int(default_lookback_limit))))
+        except (ValueError, TypeError):
+            values["default_lookback_limit"] = "50"
+
+    if display_timezone is not None:
+        try:
+            ZoneInfo(display_timezone)
+            values["display_timezone"] = display_timezone
+        except (ZoneInfoNotFoundError, Exception):
+            values["display_timezone"] = "Europe/Moscow"
+
+    if ai_system_prompt is not None:
+        values["ai_system_prompt"] = ai_system_prompt
+    if ai_prompt_template is not None:
+        values["ai_prompt_template"] = ai_prompt_template
+
+    if operator_chat_id is not None:
+        values["operator_chat_id"] = operator_chat_id.strip()
+
+    if notify_draft_threshold is not None:
+        try:
+            values["notify_draft_threshold"] = str(max(0, int(notify_draft_threshold)))
+        except (ValueError, TypeError):
+            values["notify_draft_threshold"] = "0"
+
+    if semantic_threshold is not None:
+        try:
+            values["semantic_threshold"] = str(max(0.0, min(1.0, float(semantic_threshold or 0))))
+        except (ValueError, TypeError):
+            values["semantic_threshold"] = "0"
+
+    if timeweb_ai_gateway_base_url is not None:
+        values["timeweb_ai_gateway_base_url"] = timeweb_ai_gateway_base_url.strip()
+    if timeweb_ai_gateway_model is not None:
+        values["timeweb_ai_gateway_model"] = timeweb_ai_gateway_model.strip()
+
+    if ai_temperature is not None:
+        try:
+            values["ai_temperature"] = str(max(0.0, min(2.0, float(ai_temperature))))
+        except (ValueError, TypeError):
+            values["ai_temperature"] = "0.4"
+
+    if ai_max_tokens is not None:
+        try:
+            values["ai_max_tokens"] = str(max(1, min(32000, int(ai_max_tokens))))
+        except (ValueError, TypeError):
+            values["ai_max_tokens"] = "1600"
+
+    if ai_timeout_seconds is not None:
+        try:
+            values["ai_timeout_seconds"] = str(max(5, min(300, int(ai_timeout_seconds))))
+        except (ValueError, TypeError):
+            values["ai_timeout_seconds"] = "60"
+
+    # Secrets: only overwrite when the admin actually typed a new value.
+    if telegram_bot_token:
+        values["telegram_bot_token"] = telegram_bot_token.strip()
+    if timeweb_ai_gateway_api_key:
+        values["timeweb_ai_gateway_api_key"] = timeweb_ai_gateway_api_key.strip()
+
     for k, v in values.items():
         row = db.get(AppSetting, k)
         if row:
@@ -121,12 +191,13 @@ def settings_save(
             db.add(AppSetting(key=k, value=v))
     db.commit()
 
-    sched = getattr(request.app.state, "scheduler", None)
-    if sched:
-        try:
-            sched.update_interval(interval)
-        except Exception as exc:
-            logger.warning("Could not update scheduler interval: %s", exc)
+    if interval is not None:
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched:
+            try:
+                sched.update_interval(interval)
+            except Exception as exc:
+                logger.warning("Could not update scheduler interval: %s", exc)
 
     return RedirectResponse(url="/settings", status_code=302)
 

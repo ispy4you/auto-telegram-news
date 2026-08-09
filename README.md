@@ -355,11 +355,10 @@ ADMIN_AUTH_ENABLED=true
 # Database
 DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 
-# Telegram
+# Telegram (reading sources) — one-time app registration, see below
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 TELEGRAM_SESSION_PATH=./data/telegram_session/user.session
-TELEGRAM_BOT_TOKEN=
 
 # Proxy (optional)
 TELEGRAM_PROXY_TYPE=                 # socks5 | http | mtproxy | ""
@@ -368,8 +367,15 @@ TELEGRAM_PROXY_PORT=
 TELEGRAM_PROXY_USERNAME=
 TELEGRAM_PROXY_PASSWORD=
 TELEGRAM_PROXY_SECRET=               # MTProxy only
+```
 
-# AI Gateway
+Everything below is just an **initial default** — after the first run, it's simpler (and takes
+effect immediately, no restart) to change these in the admin UI under **Settings** instead, where
+they're stored in the database:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=
+
 TIMEWEB_AI_GATEWAY_API_KEY=
 TIMEWEB_AI_GATEWAY_BASE_URL=
 TIMEWEB_AI_GATEWAY_MODEL=
@@ -377,12 +383,9 @@ AI_TEMPERATURE=0.4
 AI_MAX_TOKENS=1600
 AI_TIMEOUT_SECONDS=60
 
-# Pipeline
 FETCH_INTERVAL_SECONDS=120
 DEFAULT_LOOKBACK_LIMIT=50
 MAX_MEDIA_MB=50
-AUTO_PUBLISH_ENABLED=false
-DEFAULT_POST_MODE=manual
 ```
 
 ---

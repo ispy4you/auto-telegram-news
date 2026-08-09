@@ -353,11 +353,10 @@ ADMIN_AUTH_ENABLED=true
 # База данных
 DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 
-# Telegram
+# Telegram (чтение источников) — разовая регистрация приложения, см. ниже
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
 TELEGRAM_SESSION_PATH=./data/telegram_session/user.session
-TELEGRAM_BOT_TOKEN=
 
 # Прокси (опционально)
 TELEGRAM_PROXY_TYPE=                 # socks5 | http | mtproxy | ""
@@ -366,8 +365,14 @@ TELEGRAM_PROXY_PORT=
 TELEGRAM_PROXY_USERNAME=
 TELEGRAM_PROXY_PASSWORD=
 TELEGRAM_PROXY_SECRET=               # только для MTProxy
+```
 
-# AI Gateway
+Всё, что ниже — это только **начальное значение по умолчанию**. После первого запуска удобнее
+(и быстрее — без перезапуска) менять это в админке, в **Settings**, там значения хранятся в БД:
+
+```dotenv
+TELEGRAM_BOT_TOKEN=
+
 TIMEWEB_AI_GATEWAY_API_KEY=
 TIMEWEB_AI_GATEWAY_BASE_URL=
 TIMEWEB_AI_GATEWAY_MODEL=
@@ -375,12 +380,9 @@ AI_TEMPERATURE=0.4
 AI_MAX_TOKENS=1600
 AI_TIMEOUT_SECONDS=60
 
-# Пайплайн
 FETCH_INTERVAL_SECONDS=120
 DEFAULT_LOOKBACK_LIMIT=50
 MAX_MEDIA_MB=50
-AUTO_PUBLISH_ENABLED=false
-DEFAULT_POST_MODE=manual
 ```
 
 ---

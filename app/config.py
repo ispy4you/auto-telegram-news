@@ -42,9 +42,6 @@ class Settings(BaseSettings):
     default_lookback_limit: int = 50
     max_media_mb: int = 50
 
-    auto_publish_enabled: bool = False
-    default_post_mode: str = "manual"
-
     @property
     def media_root(self) -> Path:
         return Path("data/media")
