@@ -248,6 +248,217 @@
   </div>
 </div>
 
+{# Telegram-аккаунт (user session для чтения источников) #}
+<div class="card mt-3" id="tg-login-card">
+  <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+    <span>Telegram-аккаунт <span class="text-muted fw-normal small">(для чтения источников)</span></span>
+    <span class="badge bg-secondary" id="tg-login-status-badge">…</span>
+  </div>
+  <div class="card-body" style="font-size:.9rem">
+    {% if not env.telegram_api_id or not env.telegram_api_hash %}
+    <div class="alert alert-warning mb-0">
+      <i class="bi bi-exclamation-triangle me-1"></i>
+      Сначала задайте <code>TELEGRAM_API_ID</code> и <code>TELEGRAM_API_HASH</code> в <code>.env</code>
+      (получить на <a href="https://my.telegram.org" target="_blank" rel="noopener">my.telegram.org</a>)
+      и перезапустите приложение.
+    </div>
+    {% else %}
+    <input type="hidden" id="tg-csrf-token" value="{{ csrf_token }}">
+    <p class="text-muted mb-2">Учётная запись, через которую бот читает публичные каналы-источники (не bot-токен).</p>
+
+    <div id="tg-login-idle">
+      <button type="button" class="btn btn-outline-primary btn-sm" id="tg-login-open-btn">
+        <i class="bi bi-box-arrow-in-right me-1"></i>Войти / переподключить
+      </button>
+    </div>
+
+    <div id="tg-login-panel" class="d-none">
+      <ul class="nav nav-pills mb-3">
+        <li class="nav-item"><button type="button" class="nav-link active" id="tg-tab-qr" data-method="qr">QR-код</button></li>
+        <li class="nav-item"><button type="button" class="nav-link" id="tg-tab-phone" data-method="phone">Телефон + код</button></li>
+      </ul>
+
+      <div id="tg-login-qr">
+        <p class="text-muted small">Telegram → Настройки → Устройства → Подключить устройство, отсканируйте код:</p>
+        <div id="tg-login-qr-img" class="mb-2">
+          <div class="spinner-border spinner-border-sm text-muted" role="status"></div>
+        </div>
+      </div>
+
+      <div id="tg-login-phone" class="d-none">
+        <div id="tg-login-phone-step">
+          <div class="input-group input-group-sm" style="max-width:320px">
+            <input type="text" class="form-control" id="tg-login-phone-input" placeholder="+79991234567" autocomplete="off">
+            <button class="btn btn-primary" type="button" id="tg-login-phone-submit">Отправить код</button>
+          </div>
+        </div>
+        <div id="tg-login-code-step" class="d-none mt-2">
+          <div class="input-group input-group-sm" style="max-width:320px">
+            <input type="text" class="form-control" id="tg-login-code-input" placeholder="Код из Telegram" autocomplete="off">
+            <button class="btn btn-primary" type="button" id="tg-login-code-submit">Подтвердить</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="tg-login-password-step" class="d-none mt-2">
+        <p class="text-muted small mb-1">Включена двухфакторная защита — введите пароль:</p>
+        <div class="input-group input-group-sm" style="max-width:320px">
+          <input type="password" class="form-control" id="tg-login-password-input" placeholder="Пароль 2FA" autocomplete="off">
+          <button class="btn btn-primary" type="button" id="tg-login-password-submit">Подтвердить</button>
+        </div>
+      </div>
+
+      <div class="text-danger small mt-2 d-none" id="tg-login-error"></div>
+      <button type="button" class="btn btn-link btn-sm text-muted mt-2 p-0" id="tg-login-cancel-btn">Отмена</button>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% if env.telegram_api_id and env.telegram_api_hash %}
+<script>
+(() => {
+  const csrfToken = document.getElementById('tg-csrf-token').value;
+  const badge = document.getElementById('tg-login-status-badge');
+  const idleBox = document.getElementById('tg-login-idle');
+  const panel = document.getElementById('tg-login-panel');
+  const errorBox = document.getElementById('tg-login-error');
+  const qrImgBox = document.getElementById('tg-login-qr-img');
+  const passwordStep = document.getElementById('tg-login-password-step');
+  const phoneStep = document.getElementById('tg-login-phone-step');
+  const codeStep = document.getElementById('tg-login-code-step');
+  let pollTimer = null;
+  let currentMethod = 'qr';
+
+  async function post(url, params) {
+    const body = new URLSearchParams({csrf_token: csrfToken, ...params});
+    const r = await fetch(url, {method: 'POST', body});
+    return r.json();
+  }
+
+  function showError(msg) {
+    if (msg) {
+      errorBox.textContent = msg;
+      errorBox.classList.remove('d-none');
+    } else {
+      errorBox.classList.add('d-none');
+    }
+  }
+
+  function renderBadge(d) {
+    if (d.listener_active) {
+      badge.className = 'badge bg-success';
+      badge.textContent = 'Подключено';
+    } else if (d.listener_started) {
+      badge.className = 'badge bg-warning text-dark';
+      badge.textContent = 'Переподключение…';
+    } else {
+      badge.className = 'badge bg-secondary';
+      badge.textContent = 'Не подключено';
+    }
+  }
+
+  function render(d) {
+    renderBadge(d);
+    showError(d.error);
+
+    if (d.state === 'idle' || d.state === 'done' || d.state === 'error') {
+      panel.classList.add('d-none');
+      idleBox.classList.remove('d-none');
+      stopPolling();
+      return;
+    }
+
+    idleBox.classList.add('d-none');
+    panel.classList.remove('d-none');
+
+    passwordStep.classList.toggle('d-none', d.state !== 'password_needed');
+    if (d.state === 'password_needed') {
+      phoneStep.classList.add('d-none');
+      codeStep.classList.add('d-none');
+    }
+
+    if (d.state === 'qr_pending' && currentMethod === 'qr' && d.qr_data_uri) {
+      qrImgBox.innerHTML = `<img src="${d.qr_data_uri}" alt="QR" width="200" height="200" class="border rounded p-1">`;
+    }
+    if (d.state === 'code_sent') {
+      phoneStep.classList.add('d-none');
+      codeStep.classList.remove('d-none');
+    }
+  }
+
+  async function poll() {
+    try {
+      const d = await (await fetch('/settings/telegram-login/status')).json();
+      render(d);
+    } catch (_) {}
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(poll, 2000);
+  }
+  function stopPolling() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  }
+
+  function switchMethod(method) {
+    currentMethod = method;
+    document.getElementById('tg-tab-qr').classList.toggle('active', method === 'qr');
+    document.getElementById('tg-tab-phone').classList.toggle('active', method === 'phone');
+    document.getElementById('tg-login-qr').classList.toggle('d-none', method !== 'qr');
+    document.getElementById('tg-login-phone').classList.toggle('d-none', method !== 'phone');
+  }
+
+  document.getElementById('tg-login-open-btn').addEventListener('click', async () => {
+    idleBox.classList.add('d-none');
+    panel.classList.remove('d-none');
+    switchMethod('qr');
+    showError(null);
+    const d = await post('/settings/telegram-login/qr/start', {});
+    render(d);
+    startPolling();
+  });
+
+  document.getElementById('tg-tab-qr').addEventListener('click', () => switchMethod('qr'));
+  document.getElementById('tg-tab-phone').addEventListener('click', () => switchMethod('phone'));
+
+  document.getElementById('tg-login-phone-submit').addEventListener('click', async () => {
+    const phone = document.getElementById('tg-login-phone-input').value.trim();
+    if (!phone) return;
+    showError(null);
+    const d = await post('/settings/telegram-login/phone/start', {phone});
+    render(d);
+    startPolling();
+  });
+
+  document.getElementById('tg-login-code-submit').addEventListener('click', async () => {
+    const code = document.getElementById('tg-login-code-input').value.trim();
+    if (!code) return;
+    showError(null);
+    const d = await post('/settings/telegram-login/code', {code});
+    render(d);
+  });
+
+  document.getElementById('tg-login-password-submit').addEventListener('click', async () => {
+    const password = document.getElementById('tg-login-password-input').value;
+    if (!password) return;
+    showError(null);
+    const d = await post('/settings/telegram-login/password', {password});
+    render(d);
+  });
+
+  document.getElementById('tg-login-cancel-btn').addEventListener('click', async () => {
+    const d = await post('/settings/telegram-login/cancel', {});
+    render(d);
+  });
+
+  poll();
+  setInterval(poll, 8000);
+})();
+</script>
+{% endif %}
+
 {# Прокси для Telethon #}
 <div class="card mt-3">
   <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">

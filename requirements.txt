@@ -7,6 +7,7 @@ pydantic-settings==2.14.1
 python-dotenv==1.2.2
 telethon==1.43.2
 qrcode==8.2
+Pillow==12.3.0
 aiogram==3.28.2
 apscheduler==3.11.2
 httpx==0.28.1

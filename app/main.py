@@ -16,6 +16,7 @@ from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, Raw
 from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
+from app.services.telegram_login import TelegramLoginService
 from app.web.csrf import CSRFMiddleware
 from app.web.routes import router
 
@@ -93,12 +94,14 @@ scheduler_service = SchedulerService(
     interval_seconds=settings.fetch_interval_seconds,
     listener=event_listener,
 )
+telegram_login_service = TelegramLoginService(event_listener, SessionLocal)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.scheduler = scheduler_service
     app.state.event_listener = event_listener
+    app.state.telegram_login = telegram_login_service
     scheduler_service.start()
     if settings.telegram_api_id and settings.telegram_api_hash and settings.telegram_session_path:
         await event_listener.start(SessionLocal)

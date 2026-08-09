@@ -223,16 +223,10 @@ docker compose up -d --build
 ```
 
 This starts both the app and a PostgreSQL database (in a second container); tables are created
-automatically. Open **http://localhost:8000/login**.
-
-Then create the Telethon user session (one-time, interactive — asks for phone/code):
-
-```bash
-docker compose run --rm app python -m app.cli.init_telegram_session
-```
-
-The session is written to `./data/telegram_session/` on the host (bind-mounted into the
-container), so it survives rebuilds and restarts.
+automatically. Open **http://localhost:8000/login**, then go to **Settings → Telegram account**
+and log in with QR code or phone + code — right in the browser, no terminal access needed. The
+session is written to `./data/telegram_session/` on the host (bind-mounted into the container), so
+it survives rebuilds and restarts.
 
 By default the database uses `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` from `.env`
 (falling back to `tgnews`/`tgnews`/`tgnews` if unset) — set a real password there for anything
@@ -319,12 +313,16 @@ Tables are created automatically on first run (`Base.metadata.create_all`).
 
 #### Creating a Telethon user session
 
+Start the app, then go to **Settings → Telegram account** in the admin UI and log in with a QR
+code or phone + code (2FA password too, if enabled) — right in the browser.
+
+A CLI fallback also still works, useful for headless setups:
+
 ```bash
 python -m app.cli.init_telegram_session
 ```
 
-This runs interactively, asking for phone/code/password (if 2FA is enabled), and saves the
-session to `TELEGRAM_SESSION_PATH`.
+Both save the session to `TELEGRAM_SESSION_PATH`.
 
 ### Creating a bot via BotFather
 
@@ -484,8 +482,8 @@ front as a reverse proxy with HTTPS.
 6. **Posts** → review new posts, trigger AI generation, edit and publish. Use `Ctrl+P` for the
    Telegram-style preview.
 7. **Stats** → view the funnel, daily publish chart, top sources.
-8. **Settings** → tune deduplication thresholds, prompts, collection interval, operator
-   notifications.
+8. **Settings** → connect your Telegram account (QR code or phone + code), tune deduplication
+   thresholds, prompts, collection interval, operator notifications.
 
 ---
 
