@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](requirements.txt)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Release](https://img.shields.io/github/v/release/ispy4you/auto-telegram-news?include_prereleases)](https://github.com/ispy4you/auto-telegram-news/releases)
 
 A self-hosted bot that monitors public Telegram channels, turns their posts into ready-to-publish
 news with AI, and publishes them to your own channels via the Telegram Bot API — with a web admin
@@ -28,6 +29,7 @@ per-channel publish schedules, multi-project support, and a hardened admin UI.
 - [Database migrations](#database-migrations)
 - [Limitations](#limitations)
 - [Testing](#testing)
+- [Releases](#releases)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -483,6 +485,15 @@ pytest
 ```
 
 CI runs the full suite on every push and pull request to `main`.
+
+---
+
+## Releases
+
+Versions and the changelog are generated automatically from
+[Conventional Commits](https://www.conventionalcommits.org/) via
+[release-please](https://github.com/googleapis/release-please) — see the
+[Releases page](https://github.com/ispy4you/auto-telegram-news/releases) for the version history.
 
 ---
 

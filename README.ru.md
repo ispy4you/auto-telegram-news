@@ -6,6 +6,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue)](requirements.txt)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+[![Release](https://img.shields.io/github/v/release/ispy4you/auto-telegram-news?include_prereleases)](https://github.com/ispy4you/auto-telegram-news/releases)
 
 Production-ready MVP для мониторинга публичных Telegram-каналов, генерации новостных постов через
 AI и публикации в целевые каналы через Telegram Bot API — с веб-админкой для просмотра,
@@ -25,6 +26,7 @@ AI и публикации в целевые каналы через Telegram Bo
 - [Миграции БД](#миграции-бд)
 - [Ограничения](#ограничения)
 - [Тесты](#тесты)
+- [Релизы](#релизы)
 - [Как помочь проекту](#как-помочь-проекту)
 - [Лицензия](#лицензия)
 
@@ -480,6 +482,15 @@ pytest
 ```
 
 CI прогоняет весь набор тестов при каждом push и pull request в `main`.
+
+---
+
+## Релизы
+
+Версии и changelog генерируются автоматически из коммитов в формате
+[Conventional Commits](https://www.conventionalcommits.org/) с помощью
+[release-please](https://github.com/googleapis/release-please) — история версий на
+[странице Releases](https://github.com/ispy4you/auto-telegram-news/releases).
 
 ---
 

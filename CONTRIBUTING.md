@@ -62,6 +62,34 @@ uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 6. Be responsive to review comments. If a change requires a design discussion, say so — it's fine
    to pause a PR and take the discussion to the linked issue.
 
+## Commit message format
+
+Versioning and `CHANGELOG.md` are generated automatically by
+[release-please](https://github.com/googleapis/release-please) from commit messages, so please
+use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>: <short summary>
+
+[optional body]
+```
+
+Common types:
+
+| Type | Effect |
+|---|---|
+| `feat:` | New feature → minor version bump, listed under "Features" |
+| `fix:` | Bug fix → patch version bump, listed under "Bug Fixes" |
+| `perf:` | Performance improvement → patch bump |
+| `docs:` | Documentation only → no version bump |
+| `refactor:`, `test:`, `chore:`, `ci:`, `build:` | Internal changes → no version bump, hidden from changelog |
+
+For a breaking change, add `!` after the type (`feat!: ...`) or a `BREAKING CHANGE:` footer — this
+triggers a major version bump.
+
+Commits that don't follow this format still get merged fine — they just won't show up in the
+changelog or affect the version number.
+
 ## Code style
 
 - Follow the style already used in the file you're editing. No enforced formatter/linter yet — if
