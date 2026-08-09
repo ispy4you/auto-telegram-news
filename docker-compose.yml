@@ -1,0 +1,32 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-tgnews}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tgnews}
+      POSTGRES_DB: ${POSTGRES_DB:-tgnews}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-tgnews} -d ${POSTGRES_DB:-tgnews}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-tgnews}:${POSTGRES_PASSWORD:-tgnews}@db:5432/${POSTGRES_DB:-tgnews}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - ./data:/app/data
+
+volumes:
+  pgdata:

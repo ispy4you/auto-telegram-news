@@ -208,7 +208,43 @@ flowchart TD
 
 ## Getting started
 
-### Ubuntu / Debian
+### Quick start with Docker (recommended)
+
+The fastest way to try the app — no Python/PostgreSQL install needed, just Docker.
+
+```bash
+git clone https://github.com/ispy4you/auto-telegram-news.git
+cd auto-telegram-news
+cp .env.example .env
+# edit .env: set APP_SECRET_KEY, ADMIN_PASSWORD, and (optionally, to enable collection/AI/
+# publishing right away) TELEGRAM_API_ID/HASH, TELEGRAM_BOT_TOKEN, TIMEWEB_AI_GATEWAY_*
+
+docker compose up -d --build
+```
+
+This starts both the app and a PostgreSQL database (in a second container); tables are created
+automatically. Open **http://localhost:8000/login**.
+
+Then create the Telethon user session (one-time, interactive — asks for phone/code):
+
+```bash
+docker compose run --rm app python -m app.cli.init_telegram_session
+```
+
+The session is written to `./data/telegram_session/` on the host (bind-mounted into the
+container), so it survives rebuilds and restarts.
+
+By default the database uses `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB` from `.env`
+(falling back to `tgnews`/`tgnews`/`tgnews` if unset) — set a real password there for anything
+beyond local testing, since `docker-compose.yml` builds `DATABASE_URL` from these automatically.
+
+To stop: `docker compose down` (add `-v` to also wipe the database volume).
+
+### Manual installation
+
+Prefer running it directly with your own Python/PostgreSQL instead of Docker? See below.
+
+#### Ubuntu / Debian
 
 ```bash
 # 1. Python 3.12+ and system dependencies
@@ -232,7 +268,7 @@ cp .env.example .env
 # edit .env
 ```
 
-### macOS (local development)
+#### macOS (local development)
 
 ```bash
 brew install postgresql@17
@@ -248,7 +284,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-### Creating the PostgreSQL database
+#### Creating the PostgreSQL database
 
 **Ubuntu:**
 ```bash
@@ -281,7 +317,7 @@ Tables are created automatically on first run (`Base.metadata.create_all`).
 3. Create an app under **API development tools**.
 4. Copy `api_id` and `api_hash` into `.env`.
 
-### Creating a Telethon user session
+#### Creating a Telethon user session
 
 ```bash
 python -m app.cli.init_telegram_session
@@ -352,6 +388,10 @@ DEFAULT_POST_MODE=manual
 ---
 
 ## Running the app
+
+> Using Docker? See [Quick start with Docker](#quick-start-with-docker-recommended) — `docker
+> compose up -d` / `docker compose down` is all you need. The sections below are for the manual
+> (non-Docker) install.
 
 ### Locally
 

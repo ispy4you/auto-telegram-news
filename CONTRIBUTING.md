@@ -51,6 +51,12 @@ Run the app locally (needs PostgreSQL or the SQLite fallback — see [README.md]
 uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
+Or, without installing Python/PostgreSQL locally at all:
+
+```bash
+docker compose up -d --build
+```
+
 ## Pull request workflow
 
 1. Fork the repo and create a branch off `main` (`git checkout -b fix/short-description`).
