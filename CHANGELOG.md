@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.1.0...v1.2.0) (2026-08-23)
+
+
+### Features
+
+* support deployment on Timeweb App Platform ([#7](https://github.com/ispy4you/auto-telegram-news/issues/7)) ([eb914db](https://github.com/ispy4you/auto-telegram-news/commit/eb914dbb449ae37068283d6f774f7fe87f193192))
+
 ## [1.1.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.0.0...v1.1.0) (2026-08-09)
 
 
