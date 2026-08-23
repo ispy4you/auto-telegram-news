@@ -136,6 +136,12 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 app.include_router(router)
 
 
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Проверка состояния для App Platform: без БД и внешних сервисов."""
+    return {"status": "ok"}
+
+
 @app.exception_handler(HTTPException)
 async def auth_exception_handler(request: Request, exc: HTTPException):
     if exc.status_code == 401 and request.url.path != "/login":
