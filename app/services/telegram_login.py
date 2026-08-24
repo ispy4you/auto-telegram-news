@@ -2,13 +2,13 @@ import asyncio
 import base64
 import io
 import logging
-from pathlib import Path
 
 import qrcode
 from telethon import TelegramClient
 from telethon.errors import PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 from app.config import get_settings
+from app.services import telegram_session_store
 from app.services.telegram_reader import _TELETHON_LOCK, TelegramReaderService
 
 logger = logging.getLogger(__name__)
@@ -68,7 +68,6 @@ class TelegramLoginService:
                 await _TELETHON_LOCK.acquire()
                 self._lock_acquired = True
             await self._event_listener.stop()
-            self._reader._fix_session_journal(settings.telegram_session_path)
             self._client = self._reader._client()
             await self._client.connect()
         return self._client
@@ -209,10 +208,8 @@ class TelegramLoginService:
     async def _finish(self, client: TelegramClient) -> None:
         me = await client.get_me()
         if getattr(me, "bot", False):
-            settings = get_settings()
+            telegram_session_store.clear()
             await self._reset(resume_listener=True)
-            Path(settings.telegram_session_path).unlink(missing_ok=True)
-            Path(settings.telegram_session_path + "-journal").unlink(missing_ok=True)
             self._state = "error"
             self._error = (
                 "Это оказался bot-токен, а не пользовательский аккаунт. "
@@ -220,6 +217,8 @@ class TelegramLoginService:
             )
             self._me = None
             return
+        # Сессию сохраняем до _reset: он рвёт соединение с Telegram.
+        telegram_session_store.save_from_client(client)
         self._me = {"id": me.id, "first_name": me.first_name, "username": me.username}
         self._state = "done"
         self._error = None

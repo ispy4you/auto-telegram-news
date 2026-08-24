@@ -2,7 +2,6 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,12 +10,13 @@ from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 from app.config import get_settings
 from app.models import ActionLog, MediaItem, MediaType, RawPost, SourceChannel
+from app.services import telegram_session_store
 from app.services.media_storage import MediaStorageService
 
 logger = logging.getLogger(__name__)
 
 # Глобальный лок — только один Telethon-клиент работает в любой момент времени,
-# чтобы не было конкурентного доступа к SQLite-файлу сессии.
+# чтобы фоновый слушатель, опрос и вход в админке не толкались за одну сессию.
 _TELETHON_LOCK = asyncio.Lock()
 
 
@@ -51,7 +51,6 @@ class TelegramReaderService:
         if not self.settings.telegram_api_id or not self.settings.telegram_api_hash:
             raise RuntimeError("TELEGRAM_API_ID и TELEGRAM_API_HASH не заданы в .env")
 
-        Path(self.settings.telegram_session_path).parent.mkdir(parents=True, exist_ok=True)
         proxy, connection = self._build_proxy()
         kwargs = dict(
             connection_retries=0,
@@ -63,7 +62,7 @@ class TelegramReaderService:
         if connection:
             kwargs["connection"] = connection
         return TelegramClient(
-            self.settings.telegram_session_path,
+            telegram_session_store.load_session(),
             self.settings.telegram_api_id,
             self.settings.telegram_api_hash,
             **kwargs,
@@ -95,33 +94,25 @@ class TelegramReaderService:
             raise RuntimeError(
                 f"Timeout при подключении к Telegram для @{source.username}. "
                 "Возможные причины: нет доступа к Telegram, сессия устарела, "
-                "или сервер недоступен. Проверьте сеть и пересоздайте сессию: "
-                "python -m app.cli.init_telegram_session"
+                "или сервер недоступен. Проверьте сеть и войдите в Telegram "
+                "заново в админке."
             )
 
-    @staticmethod
-    def _fix_session_journal(session_path: str):
-        """Удаляет застрявший journal-файл Telethon-сессии если он есть."""
-        journal = Path(session_path + "-journal")
-        if journal.exists():
-            journal.unlink()
-
     async def _do_fetch(self, db: Session, source: SourceChannel, limit: int) -> int:
-        self._fix_session_journal(self.settings.telegram_session_path)
         client = self._client()
         await client.connect()
         try:
             if not await client.is_user_authorized():
                 raise RuntimeError(
                     "Сессия Telethon не авторизована или устарела. "
-                    "Пересоздайте её: python -m app.cli.init_telegram_session"
+                    "Войдите в Telegram заново в админке."
                 )
 
             me = await client.get_me()
             if getattr(me, "bot", False):
                 raise RuntimeError(
-                    "Telethon session — это бот-токен. Пересоздайте user session: "
-                    "python -m app.cli.init_telegram_session"
+                    "Telethon session — это бот-токен. Нужен вход "
+                    "пользовательским аккаунтом — войдите заново в админке."
                 )
 
             pending, last_msg_id = await self._collect_pending(client, db, source, limit)

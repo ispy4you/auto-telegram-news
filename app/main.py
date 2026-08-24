@@ -13,6 +13,7 @@ from sqlalchemy import select, text, update
 from app.config import get_settings
 from app.database import Base, SessionLocal, engine
 from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, RawPostStatus
+from app.services import telegram_session_store
 from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
@@ -33,7 +34,6 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 Path("data/media").mkdir(parents=True, exist_ok=True)
-Path("data/telegram_session").mkdir(parents=True, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 
 # ── Автомиграции (добавление колонок к существующим таблицам) ─────────────────
@@ -98,6 +98,9 @@ with SessionLocal() as db:
     )
     db.commit()
 
+# Установки, логинившиеся до переезда сессии в БД, переносим автоматически.
+telegram_session_store.migrate_legacy_file(settings.telegram_session_path)
+
 event_listener = TelegramEventListenerService()
 scheduler_service = SchedulerService(
     interval_seconds=settings.fetch_interval_seconds,
@@ -112,7 +115,7 @@ async def lifespan(app: FastAPI):
     app.state.event_listener = event_listener
     app.state.telegram_login = telegram_login_service
     scheduler_service.start()
-    if settings.telegram_api_id and settings.telegram_api_hash and settings.telegram_session_path:
+    if settings.telegram_api_id and settings.telegram_api_hash:
         await event_listener.start(SessionLocal)
     yield
     await event_listener.stop()

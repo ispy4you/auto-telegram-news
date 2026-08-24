@@ -324,7 +324,13 @@ A CLI fallback also still works, useful for headless setups:
 python -m app.cli.init_telegram_session
 ```
 
-Both save the session to `TELEGRAM_SESSION_PATH`.
+Both store the session in the database rather than on disk: a hosted container is recreated on
+every deploy, and a file-based session would mean scanning the QR code again after each one.
+`TELEGRAM_SESSION_PATH` is now only used to pick up a pre-existing file session and migrate it
+into the database, which happens automatically on first start.
+
+The session string grants full access to your Telegram account, so treat the `app_settings`
+table as secret storage.
 
 ### Creating a bot via BotFather
 
@@ -358,7 +364,7 @@ DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 # Telegram (reading sources) — one-time app registration, see below
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
-TELEGRAM_SESSION_PATH=./data/telegram_session/user.session
+TELEGRAM_SESSION_PATH=./data/telegram_session/user.session   # legacy session migration only
 
 # Proxy (optional)
 TELEGRAM_PROXY_TYPE=                 # socks5 | http | mtproxy | ""
