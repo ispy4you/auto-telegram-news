@@ -1,10 +1,10 @@
 import asyncio
-from pathlib import Path
 
 from telethon import TelegramClient
 from telethon.errors import PhoneCodeExpiredError, PhoneCodeInvalidError, SessionPasswordNeededError
 
 from app.config import get_settings
+from app.services import telegram_session_store
 
 
 def _print_auth_menu() -> str:
@@ -106,10 +106,11 @@ async def main():
     if not settings.telegram_api_id or not settings.telegram_api_hash:
         raise RuntimeError("Set TELEGRAM_API_ID and TELEGRAM_API_HASH in .env")
 
-    session_path = Path(settings.telegram_session_path)
-    session_path.parent.mkdir(parents=True, exist_ok=True)
-
-    client = TelegramClient(str(session_path), settings.telegram_api_id, settings.telegram_api_hash)
+    client = TelegramClient(
+        telegram_session_store.load_session(),
+        settings.telegram_api_id,
+        settings.telegram_api_hash,
+    )
     print("Важно: это вход пользовательским аккаунтом, НЕ bot token.")
     print("Bot token нужен только для TELEGRAM_BOT_TOKEN в .env (публикация).")
 
@@ -120,14 +121,14 @@ async def main():
     me = await client.get_me()
     if getattr(me, "bot", False):
         await client.disconnect()
-        session_path.unlink(missing_ok=True)
-        journal = Path(str(session_path) + "-journal")
-        journal.unlink(missing_ok=True)
+        telegram_session_store.clear()
         raise RuntimeError(
             "Сессия создана как бот. Для чтения каналов нужен user session.\n"
             "Запустите команду снова и авторизуйтесь как пользователь."
         )
 
+    # Сессия живёт в БД (app_settings), а не файлом — переживает пересоздание контейнера.
+    telegram_session_store.save_from_client(client)
     print(f"User session OK: {me.first_name} (@{me.username or 'no_username'}) id={me.id}")
     await client.disconnect()
 

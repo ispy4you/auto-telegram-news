@@ -322,7 +322,13 @@ CLI-вариант тоже работает, полезен для headless-с�
 python -m app.cli.init_telegram_session
 ```
 
-Оба способа сохраняют сессию в `TELEGRAM_SESSION_PATH`.
+Оба способа сохраняют сессию в базе данных, а не файлом на диске: контейнер на хостинге
+пересоздаётся при каждом деплое, и файловая сессия означала бы повторный вход по QR после
+каждой выкатки. Переменная `TELEGRAM_SESSION_PATH` осталась только для переноса старой
+файловой сессии в БД — он выполняется автоматически при первом запуске.
+
+Строка сессии даёт полный доступ к вашему Telegram-аккаунту, так что относитесь к таблице
+`app_settings` как к хранилищу секретов.
 
 ### Создание бота через BotFather
 
@@ -356,7 +362,7 @@ DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 # Telegram (чтение источников) — разовая регистрация приложения, см. ниже
 TELEGRAM_API_ID=
 TELEGRAM_API_HASH=
-TELEGRAM_SESSION_PATH=./data/telegram_session/user.session
+TELEGRAM_SESSION_PATH=./data/telegram_session/user.session   # только для миграции старой сессии
 
 # Прокси (опционально)
 TELEGRAM_PROXY_TYPE=                 # socks5 | http | mtproxy | ""
@@ -426,7 +432,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # отредактируйте .env: DATABASE_URL, APP_SECRET_KEY, ADMIN_PASSWORD, Telegram-ключи
 
-# 4. Telethon-сессия (один раз, интерактивно)
+# 4. Telethon-сессия (один раз, интерактивно; сохраняется в БД)
 python -m app.cli.init_telegram_session
 
 # 5. systemd-сервис

@@ -106,14 +106,12 @@ class TelegramEventListenerService:
 
         client = self._reader._client()
         self._client = client
-        self._reader._fix_session_journal(self._reader.settings.telegram_session_path)
-
         await client.connect()
         if not await client.is_user_authorized():
             await client.disconnect()
             raise RuntimeError(
                 "Telethon-сессия не авторизована. "
-                "Запустите: python -m app.cli.init_telegram_session"
+                "Войдите в Telegram в админке."
             )
 
         me = await client.get_me()
@@ -121,7 +119,7 @@ class TelegramEventListenerService:
             await client.disconnect()
             raise RuntimeError(
                 "Telethon-сессия создана на бот-токене. "
-                "Нужна user session: python -m app.cli.init_telegram_session"
+                "Нужен вход пользовательским аккаунтом — войдите заново в админке."
             )
 
         # Активируем ДО catch-up — планировщик сразу переходит в режим skip_fetch

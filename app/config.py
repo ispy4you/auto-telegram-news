@@ -19,6 +19,8 @@ class Settings(BaseSettings):
 
     telegram_api_id: int | None = None
     telegram_api_hash: str | None = None
+    # Только для переноса старой файловой сессии в БД при первом запуске.
+    # Рабочая сессия живёт в таблице app_settings, см. telegram_session_store.
     telegram_session_path: str = "./data/telegram_session/user.session"
     source_provider: str = "telethon"
     telegram_bot_token: str | None = None
