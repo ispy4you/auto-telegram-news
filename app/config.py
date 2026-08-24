@@ -8,8 +8,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_env: str = "local"
-    app_host: str = "127.0.0.1"
-    app_port: int = 8000
     app_secret_key: str = "change_me"
     admin_username: str = "admin"
     admin_password: str = "change_me"
@@ -22,7 +20,6 @@ class Settings(BaseSettings):
     # Только для переноса старой файловой сессии в БД при первом запуске.
     # Рабочая сессия живёт в таблице app_settings, см. telegram_session_store.
     telegram_session_path: str = "./data/telegram_session/user.session"
-    source_provider: str = "telethon"
     telegram_bot_token: str | None = None
 
     # Proxy for Telethon: type = socks5 | http | mtproxy | "" (disabled)

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ActionLog, RawPost, RawPostStatus, SourceChannel
-from app.services.source_reader import SourceReaderService
+from app.services.telegram_reader import TelegramReaderService
 from app.services.telegram_reader import TelegramReaderService
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, tpl
@@ -107,7 +107,7 @@ async def fetch_source(source_id: int, db: Session = Depends(get_db), _: bool = 
     if not source:
         return RedirectResponse(url="/sources?error=Source+not+found", status_code=302)
     try:
-        count = await SourceReaderService().fetch_source(db, source)
+        count = await TelegramReaderService().fetch_source(db, source)
         return RedirectResponse(url=f"/sources?ok={urllib.parse.quote(f'Получено {count} новых постов из {source.title}')}", status_code=302)
     except Exception as exc:
         db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=str(exc)))

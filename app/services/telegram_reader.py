@@ -78,9 +78,15 @@ class TelegramReaderService:
             cleaned = cleaned.split("/")[0]
         return cleaned.replace("@", "")
 
-    async def fetch_source(self, db: Session, source: SourceChannel, limit: int = 50) -> int:
+    async def fetch_source(self, db: Session, source: SourceChannel, limit: int | None = None) -> int:
         if not source.enabled or source.source_type != "telethon":
             return 0
+        if limit is None:
+            from app.services.prompt_settings import _get_setting
+            try:
+                limit = int(_get_setting(db, "default_lookback_limit", str(self.settings.default_lookback_limit)))
+            except (ValueError, TypeError):
+                limit = self.settings.default_lookback_limit
         if not source.username:
             raise ValueError(f"Source {source.id} не имеет username для Telethon")
 

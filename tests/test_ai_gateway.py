@@ -21,5 +21,26 @@ def test_parse_json_recovers_truncated_object():
     assert result["text"] == "hello world"
 
 
+def test_parse_json_gives_up_when_nothing_is_complete():
+    # Обрезано до первой полной пары — восстанавливать нечего.
+    assert AiGatewayClient._parse_json('{"text": "начало обрез') is None
+
+
+def test_parse_json_ignores_commas_inside_strings_and_nested_objects():
+    content = '{"suitable": true, "meta": {"a": 1, "b": 2}, "text": "раз, два, три", "reason": "обре'
+    result = AiGatewayClient._parse_json(content)
+    assert result == {"suitable": True, "meta": {"a": 1, "b": 2}, "text": "раз, два, три"}
+
+
 def test_parse_json_returns_none_for_garbage():
     assert AiGatewayClient._parse_json("not json at all") is None
+
+
+def test_missing_configuration_is_a_technical_failure(db_session):
+    """Ненастроенный шлюз — не повод отклонить новость навсегда."""
+    import asyncio
+
+    result = asyncio.run(AiGatewayClient().generate_news_post(object(), db_session))
+
+    assert result.failed is True
+    assert result.suitable is False

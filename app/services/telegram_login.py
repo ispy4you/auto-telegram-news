@@ -23,9 +23,8 @@ def _qr_to_data_uri(url: str) -> str:
 
 
 class TelegramLoginService:
-    """Drives an interactive Telethon login (QR or phone+code) from the web UI, so
-    creating a user session no longer requires a terminal (`python -m
-    app.cli.init_telegram_session`).
+    """Drives an interactive Telethon login (QR or phone+code) from the web UI —
+    the only way to create a user session.
 
     Only one login attempt runs at a time. While it's in progress, the background
     event listener is stopped and the shared Telethon lock (also used by the polling

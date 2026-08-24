@@ -21,12 +21,13 @@ audience are Russian-speaking. English is fine too. Pick whichever you're comfor
 app/
   main.py              FastAPI app entrypoint, scheduler + Telethon listener startup
   config.py            Settings (pydantic-settings, reads .env)
-  database.py           SQLAlchemy engine/session, auto-migrations
+  database.py           SQLAlchemy engine/session
+  migrations.py         Applies Alembic revisions on startup
   models.py / schemas.py
   services/            Business logic: dedup, AI generation, publishing, fetching
   web/routes/          FastAPI routers (admin UI + JSON endpoints)
   web/templates/        Jinja2 templates (Bootstrap 5)
-  cli/                  One-off scripts, e.g. init_telegram_session
+alembic/                Schema revisions
 tests/                  pytest suite (unit tests, in-memory SQLite)
 ```
 
