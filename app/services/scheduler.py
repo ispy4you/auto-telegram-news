@@ -47,7 +47,8 @@ class SchedulerService:
             raw = db.get(RawPost, generated.raw_post_id)
             if raw:
                 raw.status = RawPostStatus.GENERATED.value
-            db.delete(job)
+            # Задачу не удаляем: publish_generated_post переиспользует её и
+            # увеличит attempts, иначе лимит попыток никогда не сработает.
             db.flush()
             try:
                 await self.publisher.publish_generated_post(db, generated.id, job.target_channel_id)
@@ -72,7 +73,6 @@ class SchedulerService:
                 continue
             generated.status = GeneratedPostStatus.APPROVED.value
             target_channel_id = job.target_channel_id
-            db.delete(job)
             db.flush()
             try:
                 await self.publisher.publish_generated_post(db, generated.id, target_channel_id)

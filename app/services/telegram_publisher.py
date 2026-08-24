@@ -4,6 +4,7 @@ from pathlib import Path
 
 from aiogram import Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -65,11 +66,47 @@ class TelegramPublisherService:
         except Exception as exc:
             return False, str(exc)
 
+    @staticmethod
+    def _claim_job(db: Session, generated_post_id: int, target_channel_id: int, status: str) -> PublishJob:
+        """Одна задача на пару (пост, канал).
+
+        Раньше каждая попытка публикации создавала новую задачу со счётчиком 1,
+        а ретрай удалял старую — из-за чего ограничение на число попыток никогда
+        не срабатывало. Задачу переиспользуем, чтобы attempts реально рос.
+        """
+        job = db.scalar(
+            select(PublishJob).where(
+                PublishJob.generated_post_id == generated_post_id,
+                PublishJob.target_channel_id == target_channel_id,
+            )
+        )
+        if job is None:
+            job = PublishJob(
+                generated_post_id=generated_post_id,
+                target_channel_id=target_channel_id,
+                status=status,
+                attempts=0,
+            )
+            db.add(job)
+        job.status = status
+        return job
+
     async def publish_generated_post(self, db: Session, generated_post_id: int, target_channel_id: int, publish_text_only_on_missing_media: bool = True, include_media: bool = True):
         generated = db.get(GeneratedPost, generated_post_id)
         target = db.get(TargetChannel, target_channel_id)
         if not generated or not target:
             raise ValueError("Generated post or target not found")
+
+        if generated.status == GeneratedPostStatus.PUBLISHED.value:
+            # Повторный вызов после успешной публикации не должен слать ничего.
+            db.add(ActionLog(
+                action="publish_skipped",
+                entity_type="GeneratedPost",
+                entity_id=str(generated.id),
+                message=f"Уже опубликован в {target.chat_id}",
+            ))
+            db.commit()
+            return
 
         text = (generated.edited_text or generated.generated_text or "").strip()
         if not text:
@@ -85,13 +122,8 @@ class TelegramPublisherService:
             tz_name = _get_setting(db, "display_timezone", "Europe/Moscow")
             if not _is_within_window(target.publish_from, target.publish_to, tz_name):
                 scheduled_at = _next_window_open_utc(target.publish_from, tz_name)
-                job = PublishJob(
-                    generated_post_id=generated_post_id,
-                    target_channel_id=target_channel_id,
-                    status=PublishJobStatus.PENDING.value,
-                    scheduled_at=scheduled_at,
-                )
-                db.add(job)
+                job = self._claim_job(db, generated_post_id, target_channel_id, PublishJobStatus.PENDING.value)
+                job.scheduled_at = scheduled_at
                 generated.status = GeneratedPostStatus.SCHEDULED.value
                 generated.target_channel_id = target_channel_id
                 db.add(ActionLog(
@@ -104,8 +136,9 @@ class TelegramPublisherService:
                 return
 
         bot = await self._get_bot(db)
-        job = PublishJob(generated_post_id=generated_post_id, target_channel_id=target_channel_id, status=PublishJobStatus.RUNNING.value, attempts=1)
-        db.add(job)
+        job = self._claim_job(db, generated_post_id, target_channel_id, PublishJobStatus.RUNNING.value)
+        job.attempts += 1
+        job.scheduled_at = None
         db.flush()
 
         try:
@@ -115,8 +148,15 @@ class TelegramPublisherService:
             if include_media and media and not existing_media and not publish_text_only_on_missing_media:
                 raise FileNotFoundError("All media files missing")
 
-            sent_msg_id: int | None = None
-            if not existing_media:
+            # Длинный текст не влезает в подпись: медиа и текст уходят двумя
+            # сообщениями. Если первое доставлено, а второе упало, telegram_message_id
+            # уже сохранён: ретрай дошлёт только текст и не продублирует медиа.
+            sent_msg_id: int | None = generated.telegram_message_id
+            tail_text_pending = False
+
+            if sent_msg_id is not None:
+                await bot.send_message(chat_id=target.chat_id, text=text)
+            elif not existing_media:
                 msg = await bot.send_message(chat_id=target.chat_id, text=text)
                 sent_msg_id = msg.message_id
             elif len(existing_media) == 1:
@@ -128,8 +168,7 @@ class TelegramPublisherService:
                 else:
                     msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption)
                 sent_msg_id = msg.message_id
-                if caption is None:
-                    await bot.send_message(chat_id=target.chat_id, text=text)
+                tail_text_pending = caption is None
             else:
                 use_caption = len(text) <= 1024
                 group = []
@@ -142,8 +181,12 @@ class TelegramPublisherService:
                         group.append(InputMediaPhoto(media=file, caption=caption))
                 msgs = await bot.send_media_group(chat_id=target.chat_id, media=group)
                 sent_msg_id = msgs[0].message_id if msgs else None
-                if not use_caption:
-                    await bot.send_message(chat_id=target.chat_id, text=text)
+                tail_text_pending = not use_caption
+
+            if tail_text_pending:
+                generated.telegram_message_id = sent_msg_id
+                db.commit()
+                await bot.send_message(chat_id=target.chat_id, text=text)
 
             generated.status = GeneratedPostStatus.PUBLISHED.value
             generated.telegram_message_id = sent_msg_id
