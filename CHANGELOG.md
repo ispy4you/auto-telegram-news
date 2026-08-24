@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.2.0...v1.2.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* make the container healthcheck work on App Platform ([#9](https://github.com/ispy4you/auto-telegram-news/issues/9)) ([02003f5](https://github.com/ispy4you/auto-telegram-news/commit/02003f57468d14beeac3ddda6e0e1f40bce954c0))
+
 ## [1.2.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.1.0...v1.2.0) (2026-08-23)
 
 
