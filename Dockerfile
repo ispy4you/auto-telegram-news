@@ -10,7 +10,10 @@ ENV PYTHONUNBUFFERED=1 \
 # libgomp1 is required by onnxruntime (fastembed's backend) at runtime.
 # curl is needed by the platform healthcheck: python:3.12-slim ships without any
 # HTTP client, so a curl-based probe injected into the container silently fails.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Acquire::Retries: a flaky Debian mirror must not fail the whole build — apt exits
+# with code 100 on the first unreachable index file unless it is told to retry.
+RUN apt-get -o Acquire::Retries=5 update \
+    && apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
     libgomp1 \
     curl \
     && rm -rf /var/lib/apt/lists/*
