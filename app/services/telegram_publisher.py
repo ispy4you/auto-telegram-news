@@ -70,6 +70,15 @@ class TelegramPublisherService:
             return False, str(exc)
 
     @staticmethod
+    def _find_job(db: Session, generated_post_id: int, target_channel_id: int) -> PublishJob | None:
+        return db.scalar(
+            select(PublishJob).where(
+                PublishJob.generated_post_id == generated_post_id,
+                PublishJob.target_channel_id == target_channel_id,
+            )
+        )
+
+    @staticmethod
     def _claim_job(db: Session, generated_post_id: int, target_channel_id: int, status: str) -> PublishJob:
         """Одна задача на пару (пост, канал).
 
@@ -77,12 +86,7 @@ class TelegramPublisherService:
         а ретрай удалял старую — из-за чего ограничение на число попыток никогда
         не срабатывало. Задачу переиспользуем, чтобы attempts реально рос.
         """
-        job = db.scalar(
-            select(PublishJob).where(
-                PublishJob.generated_post_id == generated_post_id,
-                PublishJob.target_channel_id == target_channel_id,
-            )
-        )
+        job = TelegramPublisherService._find_job(db, generated_post_id, target_channel_id)
         if job is None:
             job = PublishJob(
                 generated_post_id=generated_post_id,
@@ -111,8 +115,10 @@ class TelegramPublisherService:
         if not generated or not target:
             raise ValueError("Generated post or target not found")
 
-        if generated.status == GeneratedPostStatus.PUBLISHED.value:
-            # Повторный вызов после успешной публикации не должен слать ничего.
+        # Пост может уходить в несколько каналов, поэтому «уже опубликован»
+        # проверяется по паре (пост, канал), а не по статусу поста целиком.
+        done = self._find_job(db, generated_post_id, target_channel_id)
+        if done is not None and done.status == PublishJobStatus.SUCCESS.value:
             db.add(ActionLog(
                 action="publish_skipped",
                 entity_type="GeneratedPost",
@@ -179,9 +185,9 @@ class TelegramPublisherService:
                 ))
 
             # Длинный текст не влезает в подпись: медиа и текст уходят двумя
-            # сообщениями. Если первое доставлено, а второе упало, telegram_message_id
-            # уже сохранён: ретрай дошлёт только текст и не продублирует медиа.
-            sent_msg_id: int | None = generated.telegram_message_id
+            # сообщениями. Если первое доставлено, а второе упало, id сохранён
+            # на задаче — ретрай дошлёт только текст и не продублирует медиа.
+            sent_msg_id: int | None = job.sent_message_id
             tail_text_pending = False
 
             if sent_msg_id is not None:
@@ -214,7 +220,7 @@ class TelegramPublisherService:
                 tail_text_pending = not use_caption
 
             if tail_text_pending:
-                generated.telegram_message_id = sent_msg_id
+                job.sent_message_id = sent_msg_id
                 db.commit()
                 await bot.send_message(chat_id=target.chat_id, text=text)
 

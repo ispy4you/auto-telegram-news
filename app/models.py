@@ -184,6 +184,9 @@ class PublishJob(Base):
     target_channel_id: Mapped[int] = mapped_column(ForeignKey("target_channels.id"))
     status: Mapped[str] = mapped_column(String(16), default=PublishJobStatus.PENDING.value)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
+    # id доставленного сообщения именно в этот канал: пост может уходить
+    # в несколько каналов, и у каждого своя доставка.
+    sent_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

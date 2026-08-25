@@ -73,6 +73,7 @@ def mark_published(
     generated.publish_error = None
     raw_post.status = RawPostStatus.PUBLISHED.value
     job.status = PublishJobStatus.SUCCESS.value
+    job.sent_message_id = message_id
     job.last_error = None
 
 
