@@ -1,18 +1,16 @@
 import logging
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from sqlalchemy import select, text, update
+from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, RawPostStatus
+from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
 from app.migrations import run_migrations
 from app.services import telegram_session_store
 from app.services.prompt_settings import ensure_default_prompt_settings
@@ -34,37 +32,50 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 settings = get_settings()
-Path("data/media").mkdir(parents=True, exist_ok=True)
-run_migrations()
 
-# ── Убедиться что дефолтный проект существует (ORM, без диалект-специфичного SQL)
-with SessionLocal() as db:
-    if not db.get(Project, 1):
-        db.add(Project(
-            id=1, name="Default", slug="default", enabled=True,
-            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
-        ))
+
+def _bootstrap() -> None:
+    """Подготовка окружения: схема БД, каталоги, обязательные записи.
+
+    Всё это выполняется при запуске, а не при импорте модуля: импорт должен
+    оставаться безопасным без живой базы — иначе приложение нельзя ни собрать
+    в тестах, ни поднять с временно недоступной БД.
+    """
+    settings.media_root.mkdir(parents=True, exist_ok=True)
+    run_migrations()
+
+    with SessionLocal() as db:
+        ensure_default_prompt_settings(db)
         db.commit()
-    db.execute(text("UPDATE source_channels SET project_id = 1 WHERE project_id IS NULL"))
-    db.execute(text("UPDATE target_channels SET project_id = 1 WHERE project_id IS NULL"))
-    db.commit()
 
-with SessionLocal() as db:
-    ensure_default_prompt_settings(db)
-    db.execute(
-        update(RawPost)
-        .where(RawPost.status == RawPostStatus.FAILED.value)
-        .values(status=RawPostStatus.GENERATED.value)
-    )
-    db.execute(
-        update(GeneratedPost)
-        .where(GeneratedPost.status == GeneratedPostStatus.FAILED.value, GeneratedPost.publish_error.is_(None))
-        .values(status=GeneratedPostStatus.DRAFT.value)
-    )
-    db.commit()
+    # Установки, логинившиеся до переезда сессии в БД, переносим автоматически.
+    telegram_session_store.migrate_legacy_file(settings.telegram_session_path)
 
-# Установки, логинившиеся до переезда сессии в БД, переносим автоматически.
-telegram_session_store.migrate_legacy_file(settings.telegram_session_path)
+    _report_stuck_posts()
+
+
+def _report_stuck_posts() -> None:
+    """Раньше упавшие посты молча сбрасывались в рабочий статус при каждом старте.
+
+    Это стирало след проблемы и ничего не чинило: перезапуск не делает
+    недоступный канал доступным. Теперь о них сообщается, а решение —
+    за оператором: у постов есть повторная генерация и ручная публикация.
+    """
+    with SessionLocal() as db:
+        raw_failed = db.scalar(
+            select(func.count()).select_from(RawPost).where(RawPost.status == RawPostStatus.FAILED.value)
+        ) or 0
+        generated_failed = db.scalar(
+            select(func.count()).select_from(GeneratedPost)
+            .where(GeneratedPost.status == GeneratedPostStatus.FAILED.value)
+        ) or 0
+    if raw_failed or generated_failed:
+        logger.warning(
+            "Постов в статусе FAILED: %s исходных, %s сгенерированных — разберитесь в панели",
+            raw_failed,
+            generated_failed,
+        )
+
 
 event_listener = TelegramEventListenerService()
 scheduler_service = SchedulerService(
@@ -76,6 +87,7 @@ telegram_login_service = TelegramLoginService(event_listener, SessionLocal)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    _bootstrap()
     app.state.scheduler = scheduler_service
     app.state.event_listener = event_listener
     app.state.telegram_login = telegram_login_service
