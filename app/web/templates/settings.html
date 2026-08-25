@@ -29,11 +29,11 @@
   {# Telegram-аккаунт (user session для чтения источников) #}
   <div class="col-12">
     <div class="card" id="tg-login-card">
-      <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
-        <span>Аккаунт для чтения <span class="text-muted fw-normal small">(user session, не bot-токен)</span></span>
-        <span class="badge bg-secondary" id="tg-login-status-badge">…</span>
+      <div class="card-header bg-white fw-semibold">
+        Аккаунт для чтения источников
+        <span class="text-muted fw-normal small">— обычный аккаунт Telegram, не бот</span>
       </div>
-      <div class="card-body" style="font-size:.9rem">
+      <div class="card-body">
         {% if not env.telegram_api_id or not env.telegram_api_hash %}
         <div class="alert alert-warning mb-0">
           <i class="bi bi-exclamation-triangle me-1"></i>
@@ -42,56 +42,100 @@
           и перезапустите приложение.
         </div>
         {% else %}
-        <p class="text-muted mb-2">Учётная запись, через которую бот читает публичные каналы-источники.</p>
 
-        <div id="tg-login-idle">
-          <div id="tg-login-connected" class="d-none alert alert-success py-2 px-3 mb-2 d-flex align-items-center gap-2">
-            <i class="bi bi-check-circle-fill"></i>
-            <span>Аккаунт подключён и активно слушает источники — повторный вход не требуется.</span>
+        {# ── Текущее состояние ────────────────────────────────────────── #}
+        <div id="tg-state" class="d-flex align-items-start gap-3">
+          <span id="tg-state-icon" class="fs-4 lh-1 mt-1"><i class="bi bi-circle text-secondary"></i></span>
+          <div class="flex-grow-1">
+            <div class="fw-semibold" id="tg-state-title">Проверяем…</div>
+            <div class="text-muted small" id="tg-state-hint"></div>
+            <div class="mt-2 d-flex flex-wrap gap-2" id="tg-state-actions"></div>
           </div>
-          <button type="button" class="btn btn-outline-primary btn-sm" id="tg-login-open-btn">
-            <i class="bi bi-box-arrow-in-right me-1"></i><span id="tg-login-open-btn-label">Войти</span>
-          </button>
         </div>
 
-        <div id="tg-login-panel" class="d-none">
-          <ul class="nav nav-pills mb-3">
-            <li class="nav-item"><button type="button" class="nav-link active" id="tg-tab-qr" data-method="qr">QR-код</button></li>
-            <li class="nav-item"><button type="button" class="nav-link" id="tg-tab-phone" data-method="phone">Телефон + код</button></li>
-          </ul>
+        {# ── Мастер входа ─────────────────────────────────────────────── #}
+        <div id="tg-wizard" class="d-none border-top mt-3 pt-3">
 
-          <div id="tg-login-qr">
-            <p class="text-muted small">Telegram → Настройки → Устройства → Подключить устройство, отсканируйте код:</p>
-            <div id="tg-login-qr-img" class="mb-2">
-              <div class="spinner-border spinner-border-sm text-muted" role="status"></div>
-            </div>
-          </div>
-
-          <div id="tg-login-phone" class="d-none">
-            <div id="tg-login-phone-step">
-              <div class="input-group input-group-sm" style="max-width:320px">
-                <input type="text" class="form-control" id="tg-login-phone-input" placeholder="+79991234567" autocomplete="off">
-                <button class="btn btn-primary" type="button" id="tg-login-phone-submit">Отправить код</button>
+          <div id="tg-step-method">
+            <div class="fw-semibold mb-2">Как хотите войти?</div>
+            <div class="row g-2">
+              <div class="col-md-6">
+                <button type="button" class="btn btn-outline-primary w-100 text-start p-3" id="tg-pick-qr">
+                  <div class="fw-semibold"><i class="bi bi-qr-code me-2"></i>По QR-коду</div>
+                  <div class="small text-muted mt-1">Быстрее. Нужен телефон с открытым Telegram.</div>
+                </button>
               </div>
-            </div>
-            <div id="tg-login-code-step" class="d-none mt-2">
-              <div class="input-group input-group-sm" style="max-width:320px">
-                <input type="text" class="form-control" id="tg-login-code-input" placeholder="Код из Telegram" autocomplete="off">
-                <button class="btn btn-primary" type="button" id="tg-login-code-submit">Подтвердить</button>
+              <div class="col-md-6">
+                <button type="button" class="btn btn-outline-secondary w-100 text-start p-3" id="tg-pick-phone">
+                  <div class="fw-semibold"><i class="bi bi-telephone me-2"></i>По номеру телефона</div>
+                  <div class="small text-muted mt-1">Если сканировать нечем: код придёт в Telegram.</div>
+                </button>
               </div>
             </div>
           </div>
 
-          <div id="tg-login-password-step" class="d-none mt-2">
-            <p class="text-muted small mb-1">Включена двухфакторная защита — введите пароль:</p>
-            <div class="input-group input-group-sm" style="max-width:320px">
-              <input type="password" class="form-control" id="tg-login-password-input" placeholder="Пароль 2FA" autocomplete="off">
-              <button class="btn btn-primary" type="button" id="tg-login-password-submit">Подтвердить</button>
+          <div id="tg-step-qr" class="d-none">
+            <div class="row g-3 align-items-center">
+              <div class="col-md-7">
+                <div class="fw-semibold mb-2">Отсканируйте код в Telegram на телефоне</div>
+                <ol class="mb-2 ps-3 small">
+                  <li>Откройте <b>Telegram</b> на телефоне</li>
+                  <li><b>Настройки</b> → <b>Устройства</b></li>
+                  <li><b>Подключить устройство</b></li>
+                  <li>Наведите камеру на код справа</li>
+                </ol>
+                <div class="text-muted small">
+                  <i class="bi bi-arrow-repeat me-1"></i>Код обновляется сам каждые полминуты — это нормально,
+                  просто отсканируйте тот, что видите сейчас.
+                </div>
+              </div>
+              <div class="col-md-5 text-center">
+                <div id="tg-qr-box" class="d-inline-block">
+                  <div class="spinner-border text-muted" role="status"></div>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div class="text-danger small mt-2 d-none" id="tg-login-error"></div>
-          <button type="button" class="btn btn-link btn-sm text-muted mt-2 p-0" id="tg-login-cancel-btn">Отмена</button>
+          <div id="tg-step-phone" class="d-none" style="max-width:420px">
+            <label class="form-label fw-semibold">Номер телефона аккаунта</label>
+            <div class="input-group">
+              <input type="tel" class="form-control" id="tg-phone-input" placeholder="+7 999 123-45-67" autocomplete="off">
+              <button class="btn btn-primary" type="button" id="tg-phone-submit">Получить код</button>
+            </div>
+            <div class="form-text">Код придёт сообщением в сам Telegram, а не по SMS.</div>
+          </div>
+
+          <div id="tg-step-code" class="d-none" style="max-width:420px">
+            <label class="form-label fw-semibold">Код из Telegram</label>
+            <div class="input-group">
+              <input type="text" class="form-control" id="tg-code-input" inputmode="numeric" placeholder="12345" autocomplete="one-time-code">
+              <button class="btn btn-primary" type="button" id="tg-code-submit">Подтвердить</button>
+            </div>
+            <div class="form-text">Ищите сообщение от <b>Telegram</b> в списке чатов.</div>
+          </div>
+
+          <div id="tg-step-password" class="d-none" style="max-width:420px">
+            <label class="form-label fw-semibold">Пароль двухфакторной защиты</label>
+            <div class="input-group">
+              <input type="password" class="form-control" id="tg-password-input" autocomplete="current-password">
+              <button class="btn btn-primary" type="button" id="tg-password-submit">Войти</button>
+            </div>
+            <div class="form-text">Это пароль облачного Telegram, не код из сообщения.</div>
+          </div>
+
+          <div class="alert alert-danger py-2 px-3 mt-3 mb-0 d-none" id="tg-error"></div>
+
+          <button type="button" class="btn btn-link btn-sm text-muted mt-3 p-0" id="tg-cancel">Отменить вход</button>
+        </div>
+
+        {# ── Успех ────────────────────────────────────────────────────── #}
+        <div id="tg-success" class="d-none border-top mt-3 pt-3">
+          <div class="alert alert-success mb-2">
+            <i class="bi bi-check-circle-fill me-1"></i>
+            Готово. Подключён аккаунт <b id="tg-success-account"></b>.
+          </div>
+          <div class="text-muted small">Сбор новостей начнётся в течение минуты.</div>
         </div>
         {% endif %}
       </div>
@@ -481,147 +525,213 @@
 {% if env.telegram_api_id and env.telegram_api_hash %}
 <script>
 (() => {
-  const csrfToken = document.getElementById('tg-csrf-token').value;
-  const badge = document.getElementById('tg-login-status-badge');
-  const idleBox = document.getElementById('tg-login-idle');
-  const panel = document.getElementById('tg-login-panel');
-  const errorBox = document.getElementById('tg-login-error');
-  const qrImgBox = document.getElementById('tg-login-qr-img');
-  const passwordStep = document.getElementById('tg-login-password-step');
-  const phoneStep = document.getElementById('tg-login-phone-step');
-  const codeStep = document.getElementById('tg-login-code-step');
-  const connectedBox = document.getElementById('tg-login-connected');
-  const openBtnLabel = document.getElementById('tg-login-open-btn-label');
-  let pollTimer = null;
-  let currentMethod = 'qr';
+  const csrf = document.getElementById('tg-csrf-token').value;
+  const $ = (id) => document.getElementById(id);
+
+  const stateIcon = $('tg-state-icon'), stateTitle = $('tg-state-title');
+  const stateHint = $('tg-state-hint'), stateActions = $('tg-state-actions');
+  const wizard = $('tg-wizard'), success = $('tg-success'), errorBox = $('tg-error');
+  const steps = {
+    method: $('tg-step-method'),
+    qr: $('tg-step-qr'),
+    phone: $('tg-step-phone'),
+    code: $('tg-step-code'),
+    password: $('tg-step-password'),
+  };
+
+  let timer = null;
+  let pollMs = null;
+  let currentStep = null;
+  let successShown = false;
+  let wizardOpen = false;
+
+  const STATES = {
+    ok:         {icon: 'bi-check-circle-fill text-success', title: 'Аккаунт подключён'},
+    connecting: {icon: 'bi-arrow-repeat text-warning',      title: 'Подключаемся к Telegram…'},
+    revoked:    {icon: 'bi-exclamation-triangle-fill text-danger', title: 'Нужно войти заново'},
+    none:       {icon: 'bi-circle text-secondary',          title: 'Аккаунт не подключён'},
+    logging_in: {icon: 'bi-box-arrow-in-right text-primary', title: 'Выполняется вход'},
+  };
+
+  function accountName(a) {
+    if (!a) return '';
+    const name = [a.first_name, a.last_name].filter(Boolean).join(' ').trim();
+    return a.username ? `${name || 'Аккаунт'} (@${a.username})` : (name || `id ${a.id}`);
+  }
 
   async function post(url, params) {
-    const body = new URLSearchParams({csrf_token: csrfToken, ...params});
-    const r = await fetch(url, {method: 'POST', body});
-    return r.json();
+    const body = new URLSearchParams({csrf_token: csrf, ...(params || {})});
+    return (await fetch(url, {method: 'POST', body})).json();
   }
 
   function showError(msg) {
-    if (msg) {
-      errorBox.textContent = msg;
-      errorBox.classList.remove('d-none');
-    } else {
-      errorBox.classList.add('d-none');
-    }
+    errorBox.textContent = msg || '';
+    errorBox.classList.toggle('d-none', !msg);
   }
 
-  function renderBadge(d) {
-    if (d.listener_active) {
-      badge.className = 'badge bg-success';
-      badge.textContent = 'Подключено';
-    } else if (d.listener_started) {
-      badge.className = 'badge bg-warning text-dark';
-      badge.textContent = 'Переподключение…';
+  function showStep(name, focusId) {
+    if (currentStep === name) return;
+    currentStep = name;
+    for (const [key, el] of Object.entries(steps)) el.classList.toggle('d-none', key !== name);
+    if (focusId) $(focusId).focus();
+  }
+
+  function button(label, cls, onClick) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = `btn btn-sm ${cls}`;
+    b.textContent = label;
+    b.addEventListener('click', onClick);
+    return b;
+  }
+
+  function renderState(d) {
+    const s = STATES[d.link] || STATES.none;
+    stateIcon.innerHTML = `<i class="bi ${s.icon}"></i>`;
+    stateTitle.textContent = s.title;
+    stateActions.replaceChildren();
+
+    if (d.link === 'ok') {
+      stateHint.textContent = `${accountName(d.account)} — источники читаются от его имени.`;
+      stateActions.append(
+        button('Сменить аккаунт', 'btn-outline-secondary', openWizard),
+        button('Отключить', 'btn-outline-danger', logout),
+      );
+    } else if (d.link === 'connecting') {
+      stateHint.textContent = d.account
+        ? `${accountName(d.account)} — восстанавливаем связь. Если это надолго, войдите заново.`
+        : 'Восстанавливаем связь с Telegram.';
+      stateActions.append(button('Войти заново', 'btn-outline-secondary', openWizard));
+    } else if (d.link === 'revoked') {
+      stateHint.textContent = 'Telegram больше не принимает сохранённый вход — так бывает, если сессию отключили с телефона. Пока не войдёте, новости не собираются.';
+      stateActions.append(button('Войти', 'btn-primary', openWizard));
+    } else if (d.link === 'none') {
+      stateHint.textContent = 'Пока аккаунт не подключён, источники не читаются и новых постов не появится.';
+      stateActions.append(button('Войти', 'btn-primary', openWizard));
     } else {
-      badge.className = 'badge bg-secondary';
-      badge.textContent = 'Не подключено';
+      stateHint.textContent = 'Не закрывайте страницу до конца входа.';
     }
   }
 
   function render(d) {
-    renderBadge(d);
+    renderState(d);
     showError(d.error);
 
-    if (d.state === 'idle' || d.state === 'done' || d.state === 'error') {
-      panel.classList.add('d-none');
-      idleBox.classList.remove('d-none');
-      connectedBox.classList.toggle('d-none', !d.listener_active);
-      openBtnLabel.textContent = d.listener_active ? 'Переподключить / сменить аккаунт' : 'Войти';
-      stopPolling();
-      return;
+    const active = ['qr_pending', 'code_sent', 'password_needed'].includes(d.state);
+    if (active) wizardOpen = true;
+
+    wizard.classList.toggle('d-none', !wizardOpen);
+    stateActions.classList.toggle('d-none', wizardOpen);
+
+    if (d.state === 'qr_pending') {
+      showStep('qr');
+      if (d.qr_data_uri) {
+        $('tg-qr-box').innerHTML = `<img src="${d.qr_data_uri}" alt="QR-код для входа" width="220" height="220" class="border rounded p-2 bg-white">`;
+      }
+    } else if (d.state === 'code_sent') {
+      showStep('code', 'tg-code-input');
+    } else if (d.state === 'password_needed') {
+      showStep('password', 'tg-password-input');
+    } else if (d.state === 'error' && wizardOpen) {
+      // Иначе на экране остаётся мёртвый QR рядом с сообщением об ошибке.
+      showStep('method');
     }
 
-    idleBox.classList.add('d-none');
-    panel.classList.remove('d-none');
-
-    passwordStep.classList.toggle('d-none', d.state !== 'password_needed');
-    if (d.state === 'password_needed') {
-      phoneStep.classList.add('d-none');
-      codeStep.classList.add('d-none');
+    // Состояние done держится на сервере до следующего входа, поэтому показываем
+    // подтверждение один раз, а не заново на каждом опросе.
+    if (d.state === 'done' && d.account && !successShown) {
+      successShown = true;
+      wizardOpen = false;
+      wizard.classList.add('d-none');
+      stateActions.classList.remove('d-none');
+      $('tg-success-account').textContent = accountName(d.account);
+      success.classList.remove('d-none');
+      setTimeout(() => success.classList.add('d-none'), 15000);
     }
 
-    if (d.state === 'qr_pending' && currentMethod === 'qr' && d.qr_data_uri) {
-      qrImgBox.innerHTML = `<img src="${d.qr_data_uri}" alt="QR" width="200" height="200" class="border rounded p-1">`;
-    }
-    if (d.state === 'code_sent') {
-      phoneStep.classList.add('d-none');
-      codeStep.classList.remove('d-none');
-    }
+    setPolling(active ? 2000 : 10000);
   }
 
-  async function poll() {
-    try {
-      const d = await (await fetch('/settings/telegram-login/status')).json();
-      render(d);
-    } catch (_) {}
+  async function refresh() {
+    try { render(await (await fetch('/settings/telegram-login/status')).json()); } catch (_) {}
   }
 
-  function startPolling() {
-    if (pollTimer) return;
-    pollTimer = setInterval(poll, 2000);
-  }
-  function stopPolling() {
-    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  }
-
-  function switchMethod(method) {
-    currentMethod = method;
-    document.getElementById('tg-tab-qr').classList.toggle('active', method === 'qr');
-    document.getElementById('tg-tab-phone').classList.toggle('active', method === 'phone');
-    document.getElementById('tg-login-qr').classList.toggle('d-none', method !== 'qr');
-    document.getElementById('tg-login-phone').classList.toggle('d-none', method !== 'phone');
+  function setPolling(ms) {
+    // setInterval возвращает число, свойство на нём не сохранить — держим отдельно.
+    if (pollMs === ms) return;
+    if (timer) clearInterval(timer);
+    timer = setInterval(refresh, ms);
+    pollMs = ms;
   }
 
-  document.getElementById('tg-login-open-btn').addEventListener('click', async () => {
-    idleBox.classList.add('d-none');
-    panel.classList.remove('d-none');
-    switchMethod('qr');
+  function openWizard() {
+    wizardOpen = true;
+    successShown = false;
+    success.classList.add('d-none');
     showError(null);
-    const d = await post('/settings/telegram-login/qr/start', {});
-    render(d);
-    startPolling();
-  });
+    currentStep = null;
+    showStep('method');
+    wizard.classList.remove('d-none');
+    stateActions.classList.add('d-none');
+  }
 
-  document.getElementById('tg-tab-qr').addEventListener('click', () => switchMethod('qr'));
-  document.getElementById('tg-tab-phone').addEventListener('click', () => switchMethod('phone'));
+  async function closeWizard() {
+    wizardOpen = false;
+    wizard.classList.add('d-none');
+    stateActions.classList.remove('d-none');
+    render(await post('/settings/telegram-login/cancel'));
+  }
 
-  document.getElementById('tg-login-phone-submit').addEventListener('click', async () => {
-    const phone = document.getElementById('tg-login-phone-input').value.trim();
-    if (!phone) return;
+  async function logout() {
+    if (!confirm('Отключить аккаунт? Сбор новостей остановится, пока не войдёте снова.')) return;
+    render(await post('/settings/telegram-login/logout'));
+  }
+
+  $('tg-pick-qr').addEventListener('click', async () => {
     showError(null);
-    const d = await post('/settings/telegram-login/phone/start', {phone});
-    render(d);
-    startPolling();
+    showStep('qr');
+    $('tg-qr-box').innerHTML = '<div class="spinner-border text-muted" role="status"></div>';
+    render(await post('/settings/telegram-login/qr/start'));
   });
 
-  document.getElementById('tg-login-code-submit').addEventListener('click', async () => {
-    const code = document.getElementById('tg-login-code-input').value.trim();
-    if (!code) return;
+  $('tg-pick-phone').addEventListener('click', async () => {
     showError(null);
-    const d = await post('/settings/telegram-login/code', {code});
-    render(d);
+    // Выбор другого способа отменяет начатый: одновременно они не работают.
+    await post('/settings/telegram-login/cancel');
+    wizardOpen = true;
+    showStep('phone', 'tg-phone-input');
   });
 
-  document.getElementById('tg-login-password-submit').addEventListener('click', async () => {
-    const password = document.getElementById('tg-login-password-input').value;
-    if (!password) return;
+  $('tg-phone-submit').addEventListener('click', async () => {
+    const phone = $('tg-phone-input').value.trim();
+    if (!phone) return showError('Введите номер телефона.');
     showError(null);
-    const d = await post('/settings/telegram-login/password', {password});
-    render(d);
+    render(await post('/settings/telegram-login/phone/start', {phone}));
   });
 
-  document.getElementById('tg-login-cancel-btn').addEventListener('click', async () => {
-    const d = await post('/settings/telegram-login/cancel', {});
-    render(d);
+  $('tg-code-submit').addEventListener('click', async () => {
+    const code = $('tg-code-input').value.trim();
+    if (!code) return showError('Введите код из Telegram.');
+    showError(null);
+    render(await post('/settings/telegram-login/code', {code}));
   });
 
-  poll();
-  setInterval(poll, 8000);
+  $('tg-password-submit').addEventListener('click', async () => {
+    const password = $('tg-password-input').value;
+    if (!password) return showError('Введите пароль.');
+    showError(null);
+    render(await post('/settings/telegram-login/password', {password}));
+  });
+
+  for (const id of ['tg-phone-input', 'tg-code-input', 'tg-password-input']) {
+    $(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); $(id.replace('-input', '-submit')).click(); }
+    });
+  }
+
+  $('tg-cancel').addEventListener('click', closeWizard);
+
+  refresh();
 })();
 </script>
 {% endif %}

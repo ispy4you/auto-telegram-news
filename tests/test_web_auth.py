@@ -7,29 +7,11 @@ lifespan, а значит ни миграции, ни планировщик в 
 
 import re
 
-import pytest
 from fastapi.testclient import TestClient
 
-import app.main as main_module
-from app.database import get_db
-from app.models import AppSetting, Project
-from app.web import auth as auth_module
+from app.models import AppSetting
 
 CSRF_INPUT = re.compile(r'name="csrf_token"\s+value="([^"]+)"')
-
-
-@pytest.fixture
-def client(db_session):
-    db_session.add(Project(id=1, name="Default", slug="default"))
-    db_session.commit()
-
-    main_module.app.dependency_overrides[get_db] = lambda: db_session
-    auth_module._failed_attempts.clear()  # счётчик попыток живёт в памяти процесса
-    try:
-        yield TestClient(main_module.app, follow_redirects=False)
-    finally:
-        main_module.app.dependency_overrides.clear()
-        auth_module._failed_attempts.clear()
 
 
 def _csrf(client: TestClient, path: str = "/login") -> str:

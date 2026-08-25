@@ -6,6 +6,7 @@
 к нему, поэтому обращаться с ней надо как с паролем.
 """
 
+import json
 import logging
 from pathlib import Path
 
@@ -18,6 +19,9 @@ from app.models import AppSetting
 logger = logging.getLogger(__name__)
 
 SETTING_KEY = "telegram_session_string"
+# Кто именно подключён: строку сессии не расшифровать, а показать аккаунт надо
+# и после перезапуска, когда логина в этом процессе не было.
+ACCOUNT_KEY = "telegram_account"
 
 
 def load_string(db: Session | None = None) -> str | None:
@@ -98,3 +102,56 @@ def migrate_legacy_file(path: str, db: Session | None = None) -> bool:
     save_string(value, db)
     logger.info("Telethon-сессия перенесена из %s в БД", path)
     return True
+
+
+def load_account(db: Session | None = None) -> dict | None:
+    """Данные подключённого аккаунта, сохранённые при входе."""
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        row = session.get(AppSetting, ACCOUNT_KEY)
+        raw = (row.value or "").strip() if row else ""
+    finally:
+        if own_session:
+            session.close()
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def save_account(me, db: Session | None = None) -> None:
+    """Строку сессии не расшифровать, поэтому кто подключён — храним отдельно."""
+    payload = json.dumps({
+        "id": getattr(me, "id", None),
+        "first_name": getattr(me, "first_name", None) or "",
+        "last_name": getattr(me, "last_name", None) or "",
+        "username": getattr(me, "username", None) or "",
+    })
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        row = session.get(AppSetting, ACCOUNT_KEY)
+        if row:
+            row.value = payload
+        else:
+            session.add(AppSetting(key=ACCOUNT_KEY, value=payload))
+        session.commit()
+    finally:
+        if own_session:
+            session.close()
+
+
+def clear_account(db: Session | None = None) -> None:
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        row = session.get(AppSetting, ACCOUNT_KEY)
+        if row:
+            session.delete(row)
+            session.commit()
+    finally:
+        if own_session:
+            session.close()
