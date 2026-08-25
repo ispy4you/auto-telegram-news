@@ -8,13 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import RawPost, RawPostStatus
+from app.services import settings_registry
 from app.services.text_cleanup import clean_telegram_rss_text
-
-
-# Косинус для paraphrase-multilingual-MiniLM: пересказ одной новости разными
-# источниками обычно даёт 0.85–0.95, разные новости на одну тему — 0.75–0.85.
-# 0.90 выбран консервативно: лучше пропустить повтор, чем склеить две разные новости.
-DEFAULT_SEMANTIC_THRESHOLD = 0.90
 
 
 class DeduplicationService:
@@ -68,11 +63,7 @@ class DeduplicationService:
         ).all()
 
         # Phase 2: rapidfuzz lexical similarity
-        from app.services.prompt_settings import _get_setting
-        try:
-            threshold = int(_get_setting(db, "duplicate_threshold", str(self.threshold)))
-        except (ValueError, TypeError):
-            threshold = self.threshold
+        threshold = settings_registry.get("duplicate_threshold", db)
 
         for candidate in candidates:
             score = fuzz.token_set_ratio(post.normalized_text, candidate.normalized_text or "")
@@ -83,10 +74,7 @@ class DeduplicationService:
                 return post
 
         # Phase 3: semantic similarity (requires fastembed)
-        try:
-            semantic_threshold = float(_get_setting(db, "semantic_threshold", str(DEFAULT_SEMANTIC_THRESHOLD)))
-        except (ValueError, TypeError):
-            semantic_threshold = DEFAULT_SEMANTIC_THRESHOLD
+        semantic_threshold = settings_registry.get("semantic_threshold", db)
 
         from app.services import embedder as _emb
 

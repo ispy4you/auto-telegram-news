@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost, RawPostStatus
 from app.services.news_pipeline import NewsPipelineService
+from app.services import settings_registry
 from app.services.retention import prune_action_logs
 from app.services.telegram_publisher import TelegramPublisherService
 
@@ -84,11 +85,7 @@ class SchedulerService:
                 logger.warning("Scheduled publish failed for generated_post_id=%s", generated.id, exc_info=True)
 
     async def _check_draft_notification(self, db):
-        from app.services.prompt_settings import _get_setting
-        try:
-            threshold = int(_get_setting(db, "notify_draft_threshold", "0"))
-        except (ValueError, TypeError):
-            threshold = 0
+        threshold = settings_registry.get("notify_draft_threshold", db)
         if threshold <= 0:
             return
 
@@ -151,8 +148,7 @@ class SchedulerService:
                         except Exception:
                             logger.warning("Session rollback failed after scheduler error", exc_info=True)
                         try:
-                            from app.services.prompt_settings import _get_setting
-                            if _get_setting(db, "notify_on_error", "false") == "true":
+                            if settings_registry.get("notify_on_error", db):
                                 from app.services.notifier import notify_operator
                                 try:
                                     await notify_operator(

@@ -1,38 +1,32 @@
+"""Промпты и часовой пояс.
+
+Значения живут в реестре настроек; здесь остались только удобные имена
+и заполнение промптов по умолчанию при первом запуске.
+"""
+
 from sqlalchemy.orm import Session
 
-from app.database import SessionLocal
 from app.models import AppSetting
+from app.services import settings_registry
 from app.services.ai_prompt import DEFAULT_AI_SYSTEM_PROMPT, DEFAULT_AI_USER_PROMPT_TEMPLATE
 
-DEFAULT_TIMEZONE = "Europe/Moscow"
+DEFAULT_TIMEZONE = settings_registry.DEFAULT_TIMEZONE
 
 
 def get_ai_system_prompt(db: Session | None = None) -> str:
-    return _get_setting(db, "ai_system_prompt", DEFAULT_AI_SYSTEM_PROMPT)
+    return settings_registry.get("ai_system_prompt", db)
 
 
 def get_ai_user_prompt_template(db: Session | None = None) -> str:
-    return _get_setting(db, "ai_prompt_template", DEFAULT_AI_USER_PROMPT_TEMPLATE)
+    return settings_registry.get("ai_prompt_template", db)
 
 
 def get_display_timezone(db: Session | None = None) -> str:
-    return _get_setting(db, "display_timezone", DEFAULT_TIMEZONE)
-
-
-def _get_setting(db: Session | None, key: str, default: str) -> str:
-    own_session = db is None
-    session = db or SessionLocal()
-    try:
-        row = session.get(AppSetting, key)
-        if row and row.value.strip() and row.value.strip() != "default":
-            return row.value
-        return default
-    finally:
-        if own_session:
-            session.close()
+    return settings_registry.get("display_timezone", db)
 
 
 def ensure_default_prompt_settings(db: Session) -> None:
+    """Кладёт промпты в БД, чтобы форма настроек показывала их текст."""
     defaults = {
         "ai_system_prompt": DEFAULT_AI_SYSTEM_PROMPT,
         "ai_prompt_template": DEFAULT_AI_USER_PROMPT_TEMPLATE,

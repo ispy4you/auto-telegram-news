@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
+from app.services import settings_registry
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPostStatus, TargetChannel
 
 logger = logging.getLogger(__name__)
@@ -42,8 +43,7 @@ class TelegramPublisherService:
         self._bot_token: str | None = None
 
     async def _get_bot(self, db: Session | None = None) -> Bot:
-        from app.services.prompt_settings import _get_setting
-        token = _get_setting(db, "telegram_bot_token", self.settings.telegram_bot_token or "")
+        token = settings_registry.get("telegram_bot_token", db)
         if not token:
             raise RuntimeError("TELEGRAM_BOT_TOKEN не задан ни в Settings, ни в .env")
         if self._bot is not None and self._bot_token != token:
@@ -132,8 +132,7 @@ class TelegramPublisherService:
 
         # Check publish window
         if target.publish_from and target.publish_to:
-            from app.services.prompt_settings import _get_setting
-            tz_name = _get_setting(db, "display_timezone", "Europe/Moscow")
+            tz_name = settings_registry.get("display_timezone", db)
             if not _is_within_window(target.publish_from, target.publish_to, tz_name):
                 scheduled_at = _next_window_open_utc(target.publish_from, tz_name)
                 job = self._claim_job(db, generated_post_id, target_channel_id, PublishJobStatus.PENDING.value)

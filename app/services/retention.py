@@ -12,20 +12,13 @@ from sqlalchemy import delete
 from sqlalchemy.orm import Session
 
 from app.models import ActionLog
+from app.services import settings_registry
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_RETENTION_DAYS = 30
-
-
 def prune_action_logs(db: Session) -> int:
     """Удаляет записи журнала старше настроенного срока. 0 дней — не чистить."""
-    from app.services.prompt_settings import _get_setting
-
-    try:
-        days = int(_get_setting(db, "action_log_retention_days", str(DEFAULT_RETENTION_DAYS)))
-    except (ValueError, TypeError):
-        days = DEFAULT_RETENTION_DAYS
+    days = settings_registry.get("action_log_retention_days", db)
     if days <= 0:
         return 0
 

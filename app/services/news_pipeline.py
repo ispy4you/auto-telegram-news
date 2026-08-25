@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
+from app.services import settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
 from app.services.telegram_reader import TelegramReaderService
@@ -58,9 +59,7 @@ class NewsPipelineService:
         return db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
 
     async def run_autopublish(self, db: Session):
-        from app.models import AppSetting
-        setting = db.get(AppSetting, "global_auto_publish_enabled")
-        if not setting or setting.value != "true":
+        if not settings_registry.get("global_auto_publish_enabled", db):
             return
 
         posts = db.scalars(select(RawPost).where(RawPost.status == RawPostStatus.READY.value)).all()

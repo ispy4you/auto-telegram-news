@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
+from app.services import settings_registry
 
 
 class MediaStorageService:
@@ -17,9 +18,5 @@ class MediaStorageService:
     def validate_size(self, file_size: int | None) -> bool:
         if not file_size:
             return True
-        from app.services.prompt_settings import _get_setting
-        try:
-            max_mb = int(_get_setting(None, "max_media_mb", str(self.settings.max_media_mb)))
-        except (ValueError, TypeError):
-            max_mb = self.settings.max_media_mb
+        max_mb = settings_registry.get("max_media_mb")
         return file_size <= max_mb * 1024 * 1024

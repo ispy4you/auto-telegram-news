@@ -4,8 +4,8 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import RawPost
+from app.services import settings_registry
 from app.services.prompt_settings import get_ai_system_prompt, get_ai_user_prompt_template
 
 
@@ -24,9 +24,6 @@ class AiResult:
 
 
 class AiGatewayClient:
-    def __init__(self):
-        self.settings = get_settings()
-
     def _build_messages(self, raw_post: RawPost, db: Session | None = None) -> list[dict]:
         system_prompt = get_ai_system_prompt(db)
         user_template = get_ai_user_prompt_template(db)
@@ -38,29 +35,16 @@ class AiGatewayClient:
         )
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
-    def _resolve(self, db: Session | None, key: str, env_value) -> str:
-        from app.services.prompt_settings import _get_setting
-        return _get_setting(db, key, str(env_value) if env_value is not None else "")
-
     async def generate_news_post(self, raw_post: RawPost, db: Session | None = None) -> AiResult:
-        base_url = self._resolve(db, "timeweb_ai_gateway_base_url", self.settings.timeweb_ai_gateway_base_url)
-        api_key = self._resolve(db, "timeweb_ai_gateway_api_key", self.settings.timeweb_ai_gateway_api_key)
-        model = self._resolve(db, "timeweb_ai_gateway_model", self.settings.timeweb_ai_gateway_model)
+        base_url = settings_registry.get("timeweb_ai_gateway_base_url", db)
+        api_key = settings_registry.get("timeweb_ai_gateway_api_key", db)
+        model = settings_registry.get("timeweb_ai_gateway_model", db)
         if not base_url or not api_key:
             return AiResult(False, "", "AI gateway не настроен", model, failed=True)
 
-        try:
-            temperature = float(self._resolve(db, "ai_temperature", self.settings.ai_temperature))
-        except (ValueError, TypeError):
-            temperature = self.settings.ai_temperature
-        try:
-            max_tokens = int(self._resolve(db, "ai_max_tokens", self.settings.ai_max_tokens))
-        except (ValueError, TypeError):
-            max_tokens = self.settings.ai_max_tokens
-        try:
-            timeout_seconds = int(self._resolve(db, "ai_timeout_seconds", self.settings.ai_timeout_seconds))
-        except (ValueError, TypeError):
-            timeout_seconds = self.settings.ai_timeout_seconds
+        temperature = settings_registry.get("ai_temperature", db)
+        max_tokens = settings_registry.get("ai_max_tokens", db)
+        timeout_seconds = settings_registry.get("ai_timeout_seconds", db)
 
         headers = {
             "Authorization": f"Bearer {api_key}",
