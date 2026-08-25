@@ -175,6 +175,9 @@ class GeneratedPost(Base):
 
 class PublishJob(Base):
     __tablename__ = "publish_jobs"
+    __table_args__ = (
+        UniqueConstraint("generated_post_id", "target_channel_id", name="uq_publish_job_post_target"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     generated_post_id: Mapped[int] = mapped_column(ForeignKey("generated_posts.id"))

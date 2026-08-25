@@ -11,8 +11,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from sqlalchemy import select, text, update
 
 from app.config import get_settings
-from app.database import Base, SessionLocal, engine
+from app.database import SessionLocal
 from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, RawPostStatus
+from app.migrations import run_migrations
 from app.services import telegram_session_store
 from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
@@ -34,43 +35,7 @@ logger = logging.getLogger(__name__)
 
 settings = get_settings()
 Path("data/media").mkdir(parents=True, exist_ok=True)
-Base.metadata.create_all(bind=engine)
-
-# ── Автомиграции (добавление колонок к существующим таблицам) ─────────────────
-# Совместимо с SQLite и PostgreSQL: ошибка «column already exists» перехватывается.
-with engine.connect() as _conn:
-    # Добавление новых колонок (игнорируем если уже есть)
-    for _tbl, _col, _typ in [
-        ("target_channels", "publish_from", "TEXT"),
-        ("target_channels", "publish_to", "TEXT"),
-        ("generated_posts", "telegram_message_id", "BIGINT"),
-        ("source_channels", "project_id", "INTEGER"),
-        ("target_channels", "project_id", "INTEGER"),
-        ("raw_posts", "embedding", "TEXT"),
-    ]:
-        try:
-            _conn.execute(text(f"ALTER TABLE {_tbl} ADD COLUMN {_col} {_typ}"))
-            _conn.commit()
-        except Exception as _exc:
-            _conn.rollback()
-            if "already exists" not in str(_exc).lower() and "duplicate column" not in str(_exc).lower():
-                logger.warning("Migration ADD COLUMN %s.%s failed: %s", _tbl, _col, _exc)
-    # Расширяем Integer → BigInteger для колонок с Telegram ID (64-bit значения)
-    _bigint_cols = [
-        ("raw_posts", "telegram_message_id"),
-        ("raw_posts", "telegram_grouped_id"),
-        ("source_channels", "last_message_id"),
-        ("source_channels", "telegram_channel_id"),
-        ("media_items", "telegram_message_id"),
-        ("generated_posts", "telegram_message_id"),
-    ]
-    for _tbl, _col in _bigint_cols:
-        try:
-            _conn.execute(text(f"ALTER TABLE {_tbl} ALTER COLUMN {_col} TYPE BIGINT"))
-            _conn.commit()
-        except Exception as _exc:
-            _conn.rollback()
-            logger.debug("Migration ALTER COLUMN %s.%s to BIGINT skipped: %s", _tbl, _col, _exc)
+run_migrations()
 
 # ── Убедиться что дефолтный проект существует (ORM, без диалект-специфичного SQL)
 with SessionLocal() as db:
