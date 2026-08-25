@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
+from app.services import embedder
+from app.services.deduplication import DEFAULT_SEMANTIC_THRESHOLD
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
 from app.services.retention import DEFAULT_RETENTION_DAYS
 from app.web.auth import require_auth
@@ -51,6 +53,7 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
         "media_stats": media_stats,
         "ok": ok,
         "current_tz": get_display_timezone(db),
+        "embedder_model": embedder.model_name(),
         "bot_token_set": bool(cfg.get("telegram_bot_token") or env.telegram_bot_token),
         "ai_key_set": bool(cfg.get("timeweb_ai_gateway_api_key") or env.timeweb_ai_gateway_api_key),
     })
@@ -160,7 +163,7 @@ def settings_save(
         try:
             values["semantic_threshold"] = str(max(0.0, min(1.0, float(semantic_threshold or 0))))
         except (ValueError, TypeError):
-            values["semantic_threshold"] = "0"
+            values["semantic_threshold"] = str(DEFAULT_SEMANTIC_THRESHOLD)
 
     if timeweb_ai_gateway_base_url is not None:
         values["timeweb_ai_gateway_base_url"] = timeweb_ai_gateway_base_url.strip()
