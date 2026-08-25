@@ -115,3 +115,73 @@ def test_restore_failure_does_not_break_publishing(db_session, post_with_missing
 
     assert bot.calls == ["send_message"]
     assert "media_missing" in _actions(db_session)
+
+
+# ── Какой Telethon-клиент используется для перекачки ─────────────────────────
+
+class _FakeTelethonClient:
+    def __init__(self):
+        self.connected = False
+        self.disconnected = False
+
+    async def connect(self):
+        self.connected = True
+
+    async def is_user_authorized(self):
+        return True
+
+    async def get_entity(self, _username):
+        return object()
+
+    async def get_messages(self, _entity, ids=None):
+        return []
+
+    async def disconnect(self):
+        self.disconnected = True
+
+
+@pytest.fixture
+def raw_with_missing_file(db_session, source, tmp_path):
+    raw = RawPost(source_id=source.id, telegram_message_id=9, text_hash="h", original_text="t")
+    db_session.add(raw)
+    db_session.flush()
+    db_session.add(MediaItem(
+        raw_post_id=raw.id,
+        telegram_message_id=9,
+        media_type="photo",
+        file_path=str(tmp_path / "нет-такого.jpg"),
+    ))
+    db_session.commit()
+    db_session.refresh(raw)
+    return raw
+
+
+def test_restore_borrows_the_listener_client(db_session, raw_with_missing_file, monkeypatch):
+    """Второй Telethon-клиент на живой сессии — то, чего проект избегает намеренно."""
+    from app.services import telegram_event_listener, telegram_reader
+
+    listener_client = _FakeTelethonClient()
+    monkeypatch.setattr(telegram_event_listener, "active_client", lambda: listener_client)
+    monkeypatch.setattr(
+        telegram_reader.TelegramReaderService,
+        "_client",
+        lambda self: pytest.fail("нельзя поднимать второй клиент, пока слушатель работает"),
+    )
+
+    restored = asyncio.run(telegram_reader.TelegramReaderService().restore_media(db_session, raw_with_missing_file))
+
+    assert restored == 0
+    assert listener_client.disconnected is False, "чужой клиент отключать нельзя"
+
+
+def test_restore_opens_its_own_client_when_no_listener(db_session, raw_with_missing_file, monkeypatch):
+    from app.services import telegram_event_listener, telegram_reader
+
+    own = _FakeTelethonClient()
+    monkeypatch.setattr(telegram_event_listener, "active_client", lambda: None)
+    monkeypatch.setattr(telegram_reader.TelegramReaderService, "_client", lambda self: own)
+
+    asyncio.run(telegram_reader.TelegramReaderService().restore_media(db_session, raw_with_missing_file))
+
+    assert own.connected is True
+    assert own.disconnected is True, "свой клиент надо закрывать"

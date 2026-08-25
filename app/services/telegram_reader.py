@@ -226,15 +226,29 @@ class TelegramReaderService:
         if not source or not source.username:
             return 0
 
-        async with _TELETHON_LOCK:
+        # Второй Telethon-клиент на той же сессии проект не поднимает намеренно:
+        # именно поэтому планировщик пропускает опрос, пока работает слушатель.
+        # Если слушатель жив — работаем его клиентом, а не своим.
+        from app.services import telegram_event_listener
+
+        live = telegram_event_listener.active_client()
+        if live is not None:
             return await asyncio.wait_for(
-                self._do_restore_media(db, source, raw_post, missing),
+                self._do_restore_media(db, source, raw_post, missing, live),
                 timeout=180,
             )
 
-    async def _do_restore_media(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list) -> int:
-        client = self._client()
-        await client.connect()
+        async with _TELETHON_LOCK:
+            return await asyncio.wait_for(
+                self._do_restore_media(db, source, raw_post, missing, None),
+                timeout=180,
+            )
+
+    async def _do_restore_media(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list, client) -> int:
+        own_client = client is None
+        if own_client:
+            client = self._client()
+            await client.connect()
         try:
             if not await client.is_user_authorized():
                 raise RuntimeError(
@@ -248,7 +262,8 @@ class TelegramReaderService:
                 return 0
             files = await self._download_media_list(source, raw_post.telegram_message_id, messages, client)
         finally:
-            await client.disconnect()
+            if own_client:
+                await client.disconnect()
 
         by_message = {f["telegram_message_id"]: f for f in files}
         restored = 0
