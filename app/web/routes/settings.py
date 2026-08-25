@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
+from app.services.retention import DEFAULT_RETENTION_DAYS
 from app.web.auth import require_auth
 from app.web.routes.common import to_bool, tpl, utcnow
 
@@ -67,6 +68,7 @@ def settings_save(
     max_media_mb: str | None = Form(None),
     max_post_age_hours: str | None = Form(None),
     default_lookback_limit: str | None = Form(None),
+    action_log_retention_days: str | None = Form(None),
     display_timezone: str | None = Form(None),
     ai_system_prompt: str | None = Form(None),
     ai_prompt_template: str | None = Form(None),
@@ -126,6 +128,12 @@ def settings_save(
             values["default_lookback_limit"] = str(max(1, min(500, int(default_lookback_limit))))
         except (ValueError, TypeError):
             values["default_lookback_limit"] = "50"
+
+    if action_log_retention_days is not None:
+        try:
+            values["action_log_retention_days"] = str(max(0, min(365, int(action_log_retention_days))))
+        except (ValueError, TypeError):
+            values["action_log_retention_days"] = str(DEFAULT_RETENTION_DAYS)
 
     if display_timezone is not None:
         try:
