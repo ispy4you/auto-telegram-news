@@ -63,6 +63,15 @@ def test_wrong_password_does_not_authenticate(client):
     assert client.get("/").status_code == 302
 
 
+def test_non_ascii_password_is_rejected_not_crashed(client):
+    """hmac.compare_digest на строках падает с TypeError на не-ASCII символах:
+    пароль с кириллицей раньше давал не отказ во входе, а пятисотку."""
+    response = _login(client, password="пароль-с-кириллицей")
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?error=1"
+
+
 def test_correct_credentials_open_the_panel(client):
     response = _login(client)
 
