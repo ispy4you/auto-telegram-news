@@ -13,6 +13,14 @@ _RECONNECT_DELAY = 30  # секунд между попытками перепо
 _SOURCE_RELOAD_INTERVAL = 300  # секунд между обновлением списка каналов
 
 
+_ACTIVE_LISTENER = None
+
+
+def active_client():
+    """Клиент работающего слушателя, если он есть."""
+    return _ACTIVE_LISTENER.client if _ACTIVE_LISTENER is not None else None
+
+
 class TelegramEventListenerService:
     """Держит постоянное Telethon-соединение и сохраняет новые посты в реальном времени.
 
@@ -21,6 +29,8 @@ class TelegramEventListenerService:
     """
 
     def __init__(self):
+        global _ACTIVE_LISTENER
+        _ACTIVE_LISTENER = self
         self._client = None
         self._task: asyncio.Task | None = None
         self._reload_task: asyncio.Task | None = None
@@ -35,6 +45,17 @@ class TelegramEventListenerService:
     @property
     def is_active(self) -> bool:
         return self._active
+
+    @property
+    def client(self):
+        """Живой Telethon-клиент слушателя или None.
+
+        Нужен всем, кому иначе пришлось бы поднимать второй клиент на той же
+        сессии: проект этого избегает намеренно, см. is_started.
+        """
+        if self._client is not None and self._client.is_connected():
+            return self._client
+        return None
 
     @property
     def is_started(self) -> bool:
