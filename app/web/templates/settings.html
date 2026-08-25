@@ -247,6 +247,13 @@
             {{ db_badge('max_post_age_hours', 'Дефолт: 24') }}
           </div>
           <div class="col-md-3">
+            <label class="form-label">Хранить журнал <span class="text-muted fw-normal">(дней)</span></label>
+            <input class="form-control" type="number" name="action_log_retention_days" min="0" max="365"
+              value="{{ cfg.get('action_log_retention_days', '30') }}">
+            <div class="form-text text-muted">0 — не чистить</div>
+            {{ db_badge('action_log_retention_days', 'Дефолт: 30') }}
+          </div>
+          <div class="col-md-3">
             <label class="form-label">Постов за раз <span class="text-muted fw-normal">(на источник)</span></label>
             <input class="form-control" name="default_lookback_limit" value="{{ cfg.get('default_lookback_limit', env.default_lookback_limit) }}">
             {{ db_badge('default_lookback_limit', 'Из .env: ' + env.default_lookback_limit|string) }}

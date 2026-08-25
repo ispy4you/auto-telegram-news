@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import func, select
@@ -8,12 +8,15 @@ from sqlalchemy import func, select
 from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost, RawPostStatus
 from app.services.news_pipeline import NewsPipelineService
+from app.services.retention import prune_action_logs
 from app.services.telegram_publisher import TelegramPublisherService
 
 logger = logging.getLogger(__name__)
 
 _MAX_RETRY_ATTEMPTS = 3
 _JOB_ID = "main_pipeline"
+# Чистить журнал на каждом прогоне (раз в две минуты) незачем — это скан таблицы.
+_PRUNE_INTERVAL = timedelta(hours=1)
 
 
 class SchedulerService:
@@ -27,6 +30,7 @@ class SchedulerService:
         self.last_run_at: datetime | None = None
         self.is_running: bool = False
         self._last_draft_notified: int = 0
+        self._last_prune_at: datetime | None = None
 
     @property
     def next_run_at(self) -> datetime | None:
@@ -126,13 +130,18 @@ class SchedulerService:
                         fetched = max(0, after_total - before_total)
                         fetch_mode = "event" if skip_fetch else "poll"
 
-                        db.add(ActionLog(
-                            action="scheduler_run",
-                            entity_type="Scheduler",
-                            entity_id="auto",
-                            message=f"Автосбор завершён [{fetch_mode}]. Новых постов: {fetched}. Интервал: {self.interval_seconds}с",
-                        ))
+                        # Прогон без новых постов не событие: раньше такие записи
+                        # давали 720 строк в сутки, из которых ни одна ни о чём
+                        # не сообщала. Живость планировщика видна в /api/scheduler-status.
+                        if fetched:
+                            db.add(ActionLog(
+                                action="scheduler_run",
+                                entity_type="Scheduler",
+                                entity_id="auto",
+                                message=f"Автосбор завершён [{fetch_mode}]. Новых постов: {fetched}. Интервал: {self.interval_seconds}с",
+                            ))
                         db.commit()
+                        self._prune_if_due(db)
                     except Exception as exc:
                         logger.exception("Scheduler run failed")
                         # Сессия может быть в PendingRollbackError после IntegrityError —
@@ -163,6 +172,17 @@ class SchedulerService:
                             logger.warning("Failed to record scheduler_error ActionLog", exc_info=True)
                     finally:
                         self.is_running = False
+
+    def _prune_if_due(self, db):
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if self._last_prune_at and now - self._last_prune_at < _PRUNE_INTERVAL:
+            return
+        self._last_prune_at = now
+        try:
+            prune_action_logs(db)
+        except Exception:
+            logger.warning("Не удалось почистить журнал", exc_info=True)
+            db.rollback()
 
     async def trigger_run(self):
         await self._safe_run()

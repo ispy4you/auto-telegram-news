@@ -208,4 +208,4 @@ class ActionLog(Base):
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[str] = mapped_column(String(64))
     message: Mapped[str] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
