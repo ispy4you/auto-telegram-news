@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
+from app.services import post_lifecycle
 from app.services.ai_gateway import AiGatewayClient
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
@@ -88,7 +89,10 @@ async def _generate_single_post(post: RawPost, db: Session) -> None:
         status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
         generation_error=result.reason if not result.suitable else None,
     ))
-    post.status = RawPostStatus.GENERATED.value if result.suitable else RawPostStatus.REJECTED.value
+    if result.suitable:
+        post_lifecycle.mark_generated(post)
+    else:
+        post_lifecycle.reject(post)
     post.ai_suitable = result.suitable
     post.ai_skip_reason = result.reason if not result.suitable else None
     db.commit()

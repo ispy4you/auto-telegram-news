@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
-from app.services import settings_registry
+from app.services import post_lifecycle, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
 from app.services.telegram_reader import TelegramReaderService
@@ -79,9 +79,7 @@ class NewsPipelineService:
                 db.commit()
                 break
             if not result.suitable or not result.text.strip():
-                post.status = RawPostStatus.REJECTED.value
-                post.ai_suitable = False
-                post.ai_skip_reason = result.reason or "AI unsuitable"
+                post_lifecycle.reject(post, reason=result.reason or "AI unsuitable")
                 db.commit()
                 continue
 
@@ -92,7 +90,7 @@ class NewsPipelineService:
                 status=GeneratedPostStatus.DRAFT.value,
             )
             db.add(generated)
-            post.status = RawPostStatus.GENERATED.value
+            post_lifecycle.mark_generated(post)
             post.ai_suitable = True
             db.commit()
             db.refresh(generated)

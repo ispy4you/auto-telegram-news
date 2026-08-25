@@ -4,7 +4,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
+from app.models import GeneratedPost, GeneratedPostStatus, RawPost, SourceChannel, TargetChannel
+from app.services import post_lifecycle
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
 from app.web.routes.common import GENERATED_PER_PAGE, current_project_id, tpl
@@ -37,7 +38,7 @@ def save_generated(generated_id: int, edited_text: str = Form(""), db: Session =
     generated = db.get(GeneratedPost, generated_id)
     if generated:
         generated.edited_text = edited_text
-        generated.status = GeneratedPostStatus.APPROVED.value
+        post_lifecycle.approve(generated)
         db.commit()
         return RedirectResponse(url=f"/posts/{generated.raw_post_id}", status_code=302)
     return RedirectResponse(url="/generated", status_code=302)
@@ -72,8 +73,9 @@ def reject_generated(generated_id: int, db: Session = Depends(get_db), _: bool =
     if not generated:
         return RedirectResponse(url="/posts", status_code=302)
     raw_post_id = generated.raw_post_id
-    generated.status = GeneratedPostStatus.REJECTED.value
     if generated.raw_post:
-        generated.raw_post.status = RawPostStatus.REJECTED.value
+        post_lifecycle.reject(generated.raw_post, generated=generated)
+    else:
+        generated.status = GeneratedPostStatus.REJECTED.value
     db.commit()
     return RedirectResponse(url=f"/posts/{raw_post_id}", status_code=302)

@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import RawPost, RawPostStatus
-from app.services import settings_registry
+from app.services import post_lifecycle, settings_registry
 from app.services.text_cleanup import clean_telegram_rss_text
 
 
@@ -43,9 +43,7 @@ class DeduplicationService:
             select(RawPost).where(RawPost.id != post.id, RawPost.text_hash == post.text_hash).limit(1)
         )
         if same_hash:
-            post.status = RawPostStatus.DUPLICATE.value
-            post.duplicate_of_id = same_hash.id
-            post.dedupe_score = 100.0
+            post_lifecycle.mark_duplicate(post, same_hash, 100.0)
             return post
 
         boundary = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=48)
@@ -68,9 +66,7 @@ class DeduplicationService:
         for candidate in candidates:
             score = fuzz.token_set_ratio(post.normalized_text, candidate.normalized_text or "")
             if score >= threshold:
-                post.status = RawPostStatus.DUPLICATE.value
-                post.duplicate_of_id = candidate.id
-                post.dedupe_score = float(score)
+                post_lifecycle.mark_duplicate(post, candidate, float(score))
                 return post
 
         # Phase 3: semantic similarity (requires fastembed)
@@ -92,9 +88,7 @@ class DeduplicationService:
                 if candidate.embedding:
                     sim = _emb.cosine_similarity(post_vec, json.loads(candidate.embedding))
                     if sim >= semantic_threshold:
-                        post.status = RawPostStatus.DUPLICATE.value
-                        post.duplicate_of_id = candidate.id
-                        post.dedupe_score = round(sim * 100, 2)
+                        post_lifecycle.mark_duplicate(post, candidate, round(sim * 100, 2))
                         return post
 
         post.status = RawPostStatus.READY.value
