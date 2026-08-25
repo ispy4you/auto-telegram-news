@@ -101,12 +101,5 @@ class DeduplicationService:
                             post.dedupe_score = round(sim * 100, 2)
                             return post
 
-            # Store embedding for future comparisons even if this post is unique
-            if post.embedding is None:
-                from app.services import embedder as _emb
-                vec_json = _emb.embed_text_json(normalized)
-                if vec_json:
-                    post.embedding = vec_json
-
         post.status = RawPostStatus.READY.value
         return post
