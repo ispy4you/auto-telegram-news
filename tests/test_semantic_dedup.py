@@ -5,8 +5,8 @@ import json
 import pytest
 
 from app.models import AppSetting, RawPost, RawPostStatus
-from app.services import deduplication as dedup_module
-from app.services.deduplication import DEFAULT_SEMANTIC_THRESHOLD, DeduplicationService
+from app.services.deduplication import DeduplicationService
+from app.services.settings_registry import DEFAULT_SEMANTIC_THRESHOLD
 
 
 @pytest.fixture

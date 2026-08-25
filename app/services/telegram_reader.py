@@ -11,7 +11,7 @@ from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 from app.config import get_settings
 from app.models import ActionLog, MediaItem, MediaType, RawPost, SourceChannel
-from app.services import telegram_session_store
+from app.services import settings_registry, telegram_session_store
 from app.services.media_storage import MediaStorageService
 
 logger = logging.getLogger(__name__)
@@ -83,11 +83,7 @@ class TelegramReaderService:
         if not source.enabled or source.source_type != "telethon":
             return 0
         if limit is None:
-            from app.services.prompt_settings import _get_setting
-            try:
-                limit = int(_get_setting(db, "default_lookback_limit", str(self.settings.default_lookback_limit)))
-            except (ValueError, TypeError):
-                limit = self.settings.default_lookback_limit
+            limit = settings_registry.get("default_lookback_limit", db)
         if not source.username:
             raise ValueError(f"Source {source.id} не имеет username для Telethon")
 
@@ -132,12 +128,7 @@ class TelegramReaderService:
     def _max_post_age_cutoff(db: Session) -> datetime | None:
         """Посты старше этого момента игнорируются при сборе (не тянем недельный
         бэклог после долгого простоя). 0 в настройках — отключить отсечку."""
-        from app.services.prompt_settings import _get_setting
-
-        try:
-            max_age_hours = float(_get_setting(db, "max_post_age_hours", "24"))
-        except (ValueError, TypeError):
-            max_age_hours = 24.0
+        max_age_hours = settings_registry.get("max_post_age_hours", db)
         if max_age_hours <= 0:
             return None
         return datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
