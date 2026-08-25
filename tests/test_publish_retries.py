@@ -91,14 +91,33 @@ def test_attempts_grow_across_retries(db_session, generated, target):
         db_session.commit()
 
 
-def test_published_post_is_not_sent_again(db_session, generated, target):
-    generated.status = GeneratedPostStatus.PUBLISHED.value
+def test_published_post_is_not_sent_to_the_same_channel_again(db_session, generated, target):
+    first = _FakeBot()
+    _publish(_publisher(first), db_session, generated.id, target.id)
+    assert first.calls == ["send_message"]
+
+    again = _FakeBot()
+    _publish(_publisher(again), db_session, generated.id, target.id)
+
+    assert again.calls == []
+
+
+def test_post_reaches_every_target_channel(db_session, generated, target):
+    """Один пост может уходить в несколько каналов — защита от повтора не должна это ломать."""
+    second = TargetChannel(title="Target 2", chat_id="@target2")
+    db_session.add(second)
     db_session.commit()
+    db_session.refresh(second)
+
     bot = _FakeBot()
+    publisher = _publisher(bot)
+    _publish(publisher, db_session, generated.id, target.id)
+    _publish(publisher, db_session, generated.id, second.id)
 
-    _publish(_publisher(bot), db_session, generated.id, target.id)
-
-    assert bot.calls == []
+    assert bot.calls == ["send_message", "send_message"]
+    jobs = db_session.scalars(select(PublishJob)).all()
+    assert {job.target_channel_id for job in jobs} == {target.id, second.id}
+    assert all(job.status == PublishJobStatus.SUCCESS.value for job in jobs)
 
 
 def test_media_is_not_resent_when_only_the_text_failed(db_session, generated, source, target, tmp_path):
@@ -119,7 +138,8 @@ def test_media_is_not_resent_when_only_the_text_failed(db_session, generated, so
         _publish(_publisher(failing), db_session, generated.id, target.id)
 
     assert failing.calls == ["send_photo", "send_message"]
-    assert generated.telegram_message_id is not None, "id доставленного медиа должен сохраниться"
+    job = db_session.scalars(select(PublishJob)).one()
+    assert job.sent_message_id is not None, "id доставленного медиа должен сохраниться на задаче"
 
     generated.status = GeneratedPostStatus.APPROVED.value
     db_session.commit()
@@ -129,3 +149,26 @@ def test_media_is_not_resent_when_only_the_text_failed(db_session, generated, so
 
     assert retry.calls == ["send_message"], "медиа отправлять повторно нельзя"
     assert generated.status == GeneratedPostStatus.PUBLISHED.value
+
+
+def test_media_marker_does_not_leak_between_channels(db_session, generated, target, tmp_path):
+    """Отметка «медиа уже ушло» относится к каналу, а не к посту целиком."""
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"jpeg")
+    db_session.add(MediaItem(
+        raw_post_id=generated.raw_post_id,
+        telegram_message_id=1,
+        media_type="photo",
+        file_path=str(photo),
+    ))
+    second = TargetChannel(title="Target 2", chat_id="@target2")
+    db_session.add(second)
+    db_session.commit()
+    db_session.refresh(second)
+
+    bot = _FakeBot()
+    publisher = _publisher(bot)
+    _publish(publisher, db_session, generated.id, target.id)
+    _publish(publisher, db_session, generated.id, second.id)
+
+    assert bot.calls == ["send_photo", "send_photo"], "во второй канал медиа тоже обязано уехать"
