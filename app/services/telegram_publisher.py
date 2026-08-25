@@ -1,3 +1,4 @@
+import logging
 import zoneinfo
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
@@ -9,6 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPostStatus, TargetChannel
+
+logger = logging.getLogger(__name__)
 
 
 def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
@@ -91,6 +94,17 @@ class TelegramPublisherService:
         job.status = status
         return job
 
+    @staticmethod
+    async def _restore_missing_media(db: Session, raw_post) -> int:
+        """Перекачка медиа не должна ронять публикацию: без картинок пост всё ещё нужен."""
+        from app.services.telegram_reader import TelegramReaderService
+
+        try:
+            return await TelegramReaderService().restore_media(db, raw_post)
+        except Exception as exc:
+            logger.warning("Не удалось перекачать медиа для поста %s: %s", raw_post.id, exc)
+            return 0
+
     async def publish_generated_post(self, db: Session, generated_post_id: int, target_channel_id: int, publish_text_only_on_missing_media: bool = True, include_media: bool = True):
         generated = db.get(GeneratedPost, generated_post_id)
         target = db.get(TargetChannel, target_channel_id)
@@ -143,10 +157,29 @@ class TelegramPublisherService:
 
         try:
             media = sorted(raw_post.media_items, key=lambda m: m.sort_order)
+            if include_media and any(not Path(m.file_path).exists() for m in media):
+                # Диск не переживает деплой, а сообщение в исходном канале — переживает.
+                await self._restore_missing_media(db, raw_post)
+
             existing_media = [m for m in media if Path(m.file_path).exists()] if include_media else []
 
             if include_media and media and not existing_media and not publish_text_only_on_missing_media:
                 raise FileNotFoundError("All media files missing")
+
+            if include_media and len(existing_media) < len(media):
+                # Раньше пропавшее медиа просто отфильтровывалось и пост уходил
+                # текстом, а в панели он по-прежнему выглядел как пост с картинками.
+                lost = len(media) - len(existing_media)
+                logger.warning(
+                    "Пост %s публикуется без %s из %s медиафайлов: восстановить не удалось",
+                    generated.id, lost, len(media),
+                )
+                db.add(ActionLog(
+                    action="media_missing",
+                    entity_type="GeneratedPost",
+                    entity_id=str(generated.id),
+                    message=f"Публикация без {lost} из {len(media)} медиафайлов: восстановить из источника не удалось",
+                ))
 
             # Длинный текст не влезает в подпись: медиа и текст уходят двумя
             # сообщениями. Если первое доставлено, а второе упало, telegram_message_id

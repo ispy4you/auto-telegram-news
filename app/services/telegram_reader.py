@@ -2,6 +2,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -219,6 +220,57 @@ class TelegramReaderService:
             ))
         db.commit()
         return new_count
+
+    async def restore_media(self, db: Session, raw_post: RawPost) -> int:
+        """Перекачивает медиа поста из исходного канала, если файлов нет на диске.
+
+        Диск — кэш, а не хранилище: на хостинге он не переживает деплой. Источник
+        правды по медиа — сам Telegram, сообщение по-прежнему лежит в канале.
+        Возвращает число восстановленных файлов.
+        """
+        missing = [m for m in raw_post.media_items if not Path(m.file_path).exists()]
+        if not missing:
+            return 0
+        source = raw_post.source
+        if not source or not source.username:
+            return 0
+
+        async with _TELETHON_LOCK:
+            return await asyncio.wait_for(
+                self._do_restore_media(db, source, raw_post, missing),
+                timeout=180,
+            )
+
+    async def _do_restore_media(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list) -> int:
+        client = self._client()
+        await client.connect()
+        try:
+            if not await client.is_user_authorized():
+                raise RuntimeError(
+                    "Сессия Telethon не авторизована или устарела. "
+                    "Войдите в Telegram заново в админке."
+                )
+            entity = await client.get_entity(self._extract_username(source.username))
+            ids = sorted({item.telegram_message_id for item in missing})
+            messages = [m for m in await client.get_messages(entity, ids=ids) if m is not None]
+            if not messages:
+                return 0
+            files = await self._download_media_list(source, raw_post.telegram_message_id, messages, client)
+        finally:
+            await client.disconnect()
+
+        by_message = {f["telegram_message_id"]: f for f in files}
+        restored = 0
+        for item in missing:
+            downloaded = by_message.get(item.telegram_message_id)
+            if not downloaded:
+                continue
+            item.file_path = downloaded["path"]
+            item.file_size = downloaded["file_size"]
+            restored += 1
+        if restored:
+            db.commit()
+        return restored
 
     async def _download_media_list(self, source: SourceChannel, anchor_msg_id: int, msgs: list, client: TelegramClient) -> list[dict]:
         """Скачивает медиафайлы на диск. Не трогает DB."""
