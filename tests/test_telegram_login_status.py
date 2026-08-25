@@ -67,3 +67,4 @@ def test_needs_login_starts_clean():
     from app.services.telegram_event_listener import TelegramEventListenerService
 
     assert TelegramEventListenerService().needs_login is False
+

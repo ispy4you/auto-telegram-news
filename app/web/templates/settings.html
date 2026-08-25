@@ -542,7 +542,7 @@
   let timer = null;
   let pollMs = null;
   let currentStep = null;
-  let successShown = false;
+  let prevState = null;
   let wizardOpen = false;
 
   const STATES = {
@@ -637,10 +637,13 @@
       showStep('method');
     }
 
-    // Состояние done держится на сервере до следующего входа, поэтому показываем
-    // подтверждение один раз, а не заново на каждом опросе.
-    if (d.state === 'done' && d.account && !successShown) {
-      successShown = true;
+    // Состояние done держится на сервере до следующего входа. Подтверждение
+    // показываем только тому, кто вход и выполнил: по переходу в done, а не по
+    // самому факту done — иначе плашка всплывала бы при каждом обновлении страницы.
+    const justConnected = prevState !== null && prevState !== 'done' && d.state === 'done';
+    prevState = d.state;
+
+    if (justConnected && d.account) {
       wizardOpen = false;
       wizard.classList.add('d-none');
       stateActions.classList.remove('d-none');
@@ -666,7 +669,6 @@
 
   function openWizard() {
     wizardOpen = true;
-    successShown = false;
     success.classList.add('d-none');
     showError(null);
     currentStep = null;
