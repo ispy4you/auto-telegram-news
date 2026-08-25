@@ -135,6 +135,8 @@ class TelegramEventListenerService:
     async def _connect_and_listen(self) -> None:
         from telethon import events
 
+        from app.services import telegram_session_store
+
         client = self._reader._client()
         self._client = client
         await client.connect()
@@ -156,6 +158,14 @@ class TelegramEventListenerService:
                 "Telethon-сессия создана на бот-токене. "
                 "Нужен вход пользовательским аккаунтом — войдите заново в админке."
             )
+
+        # Кто именно подключён, знает только тот, кто уже спросил Telegram.
+        # Записываем здесь, иначе у сессий, созданных до появления этой карточки,
+        # имя появлялось бы только после повторного входа.
+        try:
+            telegram_session_store.save_account(me)
+        except Exception:
+            logger.warning("Не удалось сохранить данные аккаунта", exc_info=True)
 
         # Активируем ДО catch-up — планировщик сразу переходит в режим skip_fetch
         await self.reload_sources()
