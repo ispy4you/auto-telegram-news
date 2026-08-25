@@ -52,6 +52,11 @@ async def telegram_login_password(
     return await _guarded(request, _svc(request).submit_password(password))
 
 
+@router.post("/settings/telegram-login/logout")
+async def telegram_login_logout(request: Request, _: bool = Depends(require_auth)):
+    return JSONResponse(await _svc(request).logout())
+
+
 @router.post("/settings/telegram-login/cancel")
 async def telegram_login_cancel(request: Request, _: bool = Depends(require_auth)):
     return JSONResponse(await _svc(request).cancel())

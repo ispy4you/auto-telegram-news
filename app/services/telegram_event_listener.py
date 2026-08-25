@@ -35,6 +35,7 @@ class TelegramEventListenerService:
         self._task: asyncio.Task | None = None
         self._reload_task: asyncio.Task | None = None
         self._active = False
+        self._needs_login = False
         self._started = False  # True с момента start() — не сбрасывается при переподключении
         self._db_factory = None
         self._source_usernames: set[str] = set()  # lowercase usernames
@@ -45,6 +46,15 @@ class TelegramEventListenerService:
     @property
     def is_active(self) -> bool:
         return self._active
+
+    @property
+    def needs_login(self) -> bool:
+        """True, когда сессия есть, но Telegram её не принимает.
+
+        Отличает «ещё переподключаемся» от «нужен вход»: снаружи это выглядит
+        одинаково — слушатель неактивен, — а делать надо разное.
+        """
+        return self._needs_login
 
     @property
     def client(self):
@@ -129,6 +139,7 @@ class TelegramEventListenerService:
         self._client = client
         await client.connect()
         if not await client.is_user_authorized():
+            self._needs_login = True
             await client.disconnect()
             raise RuntimeError(
                 "Telethon-сессия не авторизована. "

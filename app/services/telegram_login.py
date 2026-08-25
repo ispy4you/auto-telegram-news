@@ -50,13 +50,41 @@ class TelegramLoginService:
         data = {
             "state": self._state,
             "error": self._error,
-            "me": self._me,
+            "link": self._link_state(),
+            "account": self._me or telegram_session_store.load_account(),
             "listener_active": self._event_listener.is_active,
             "listener_started": self._event_listener.is_started,
         }
         if self._state == "qr_pending":
             data["qr_data_uri"] = self._qr_data_uri
         return data
+
+    def _link_state(self) -> str:
+        """Одно понятное состояние вместо трёх флагов, которые надо совмещать в уме.
+
+        Раньше карточка показывала «Переподключение…» и когда связь моргнула,
+        и когда сессии просто нет, — то есть молчала именно тогда, когда от
+        пользователя требовалось действие.
+        """
+        if self._state in ("qr_pending", "code_sent", "password_needed"):
+            return "logging_in"
+        if telegram_session_store.load_string() is None:
+            return "none"
+        if self._event_listener.is_active:
+            return "ok"
+        if self._event_listener.needs_login:
+            return "revoked"
+        return "connecting"
+
+    async def logout(self) -> dict:
+        """Отключить аккаунт, не начиная новый вход."""
+        telegram_session_store.clear()
+        telegram_session_store.clear_account()
+        self._me = None
+        self._state = "idle"
+        self._error = None
+        await self._reset(resume_listener=True)
+        return self.status()
 
     async def _ensure_client(self) -> TelegramClient:
         settings = get_settings()
@@ -208,6 +236,7 @@ class TelegramLoginService:
         me = await client.get_me()
         if getattr(me, "bot", False):
             telegram_session_store.clear()
+            telegram_session_store.clear_account()
             await self._reset(resume_listener=True)
             self._state = "error"
             self._error = (
@@ -218,7 +247,8 @@ class TelegramLoginService:
             return
         # Сессию сохраняем до _reset: он рвёт соединение с Telegram.
         telegram_session_store.save_from_client(client)
-        self._me = {"id": me.id, "first_name": me.first_name, "username": me.username}
+        telegram_session_store.save_account(me)
+        self._me = telegram_session_store.load_account()
         self._state = "done"
         self._error = None
         await self._reset(resume_listener=True)
