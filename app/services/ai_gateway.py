@@ -18,6 +18,9 @@ class AiResult:
     text: str
     reason: str
     model_name: str
+    # True — шлюз не ответил или ответил мусором. Это не «новость не подходит»:
+    # пост нужно не отклонять, а обработать заново на следующем прогоне.
+    failed: bool = False
 
 
 class AiGatewayClient:
@@ -44,7 +47,7 @@ class AiGatewayClient:
         api_key = self._resolve(db, "timeweb_ai_gateway_api_key", self.settings.timeweb_ai_gateway_api_key)
         model = self._resolve(db, "timeweb_ai_gateway_model", self.settings.timeweb_ai_gateway_model)
         if not base_url or not api_key:
-            return AiResult(False, "", "AI gateway не настроен", model)
+            return AiResult(False, "", "AI gateway не настроен", model, failed=True)
 
         try:
             temperature = float(self._resolve(db, "ai_temperature", self.settings.ai_temperature))
@@ -71,15 +74,18 @@ class AiGatewayClient:
             "response_format": {"type": "json_object"},
         }
 
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            resp = await client.post(base_url.rstrip("/") + "/chat/completions", headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                resp = await client.post(base_url.rstrip("/") + "/chat/completions", headers=headers, json=payload)
+                resp.raise_for_status()
+                data = resp.json()
+        except Exception as exc:
+            return AiResult(False, "", f"AI gateway недоступен: {type(exc).__name__}: {exc}", model, failed=True)
 
         content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         parsed = self._parse_json(content)
         if parsed is None:
-            return AiResult(False, "", f"AI вернул не-JSON ответ: {content[:300]}", model)
+            return AiResult(False, "", f"AI вернул не-JSON ответ: {content[:300]}", model, failed=True)
         return AiResult(bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""), model)
 
     @staticmethod
@@ -95,14 +101,37 @@ class AiGatewayClient:
         except json.JSONDecodeError:
             pass
 
-        # Пробуем восстановить обрезанный JSON: ищем последний полный ключ
-        # Стратегия: обрезаем до последней закрытой строки и закрываем объект
-        for end in range(len(stripped), 0, -1):
-            try:
-                candidate = stripped[:end].rstrip().rstrip(",") + "}"
-                result = json.loads(candidate)
-                if isinstance(result, dict):
-                    return result
-            except json.JSONDecodeError:
-                continue
-        return None
+        # Ответ обрезан лимитом токенов. Отбрасываем незавершённую пару
+        # ключ-значение и закрываем объект — один разбор вместо перебора всех
+        # длин строки, который на ответе в 10 КБ давал десять тысяч попыток.
+        cut = AiGatewayClient._last_top_level_comma(stripped)
+        if cut is None:
+            return None
+        try:
+            result = json.loads(stripped[:cut] + "}")
+        except json.JSONDecodeError:
+            return None
+        return result if isinstance(result, dict) else None
+
+    @staticmethod
+    def _last_top_level_comma(text: str) -> int | None:
+        """Позиция последней запятой верхнего уровня вне строкового литерала."""
+        depth = 0
+        in_string = False
+        escaped = False
+        last_comma: int | None = None
+        for index, char in enumerate(text):
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = not in_string
+            elif not in_string:
+                if char in "{[":
+                    depth += 1
+                elif char in "}]":
+                    depth -= 1
+                elif char == "," and depth == 1:
+                    last_comma = index
+        return last_comma

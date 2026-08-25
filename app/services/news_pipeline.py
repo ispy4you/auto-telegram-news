@@ -7,7 +7,7 @@ from app.config import get_settings
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
-from app.services.source_reader import SourceReaderService
+from app.services.telegram_reader import TelegramReaderService
 from app.services.telegram_publisher import TelegramPublisherService
 
 logger = logging.getLogger(__name__)
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class NewsPipelineService:
     def __init__(self):
         self.settings = get_settings()
-        self.reader = SourceReaderService()
+        self.reader = TelegramReaderService()
         self.deduper = DeduplicationService()
         self.ai_client = AiGatewayClient()
         self.publisher = TelegramPublisherService()
@@ -72,6 +72,13 @@ class NewsPipelineService:
                 continue
 
             result = await self.ai_client.generate_news_post(post, db)
+            if result.failed:
+                # Техническая ошибка шлюза, а не редакционный отказ: пост остаётся
+                # READY и будет обработан на следующем прогоне. Остальные посты
+                # в этом прогоне не трогаем — шлюз для них тоже недоступен.
+                db.add(ActionLog(action="ai_error", entity_type="RawPost", entity_id=str(post.id), message=result.reason))
+                db.commit()
+                break
             if not result.suitable or not result.text.strip():
                 post.status = RawPostStatus.REJECTED.value
                 post.ai_suitable = False

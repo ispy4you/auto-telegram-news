@@ -316,13 +316,7 @@ DATABASE_URL=postgresql://tgnews:yourpassword@localhost/tgnews
 Запустите приложение и перейдите в **Settings → Telegram-аккаунт** в админке — вход через QR-код
 или телефон+код (и пароль 2FA, если включён) прямо в браузере.
 
-CLI-вариант тоже работает, полезен для headless-серверов:
-
-```bash
-python -m app.cli.init_telegram_session
-```
-
-Оба способа сохраняют сессию в базе данных, а не файлом на диске: контейнер на хостинге
+Сессия сохраняется в базе данных, а не файлом на диске: контейнер на хостинге
 пересоздаётся при каждом деплое, и файловая сессия означала бы повторный вход по QR после
 каждой выкатки. Переменная `TELEGRAM_SESSION_PATH` осталась только для переноса старой
 файловой сессии в БД — он выполняется автоматически при первом запуске.
@@ -432,10 +426,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # отредактируйте .env: DATABASE_URL, APP_SECRET_KEY, ADMIN_PASSWORD, Telegram-ключи
 
-# 4. Telethon-сессия (один раз, интерактивно; сохраняется в БД)
-python -m app.cli.init_telegram_session
-
-# 5. systemd-сервис
+# 4. systemd-сервис
 sudo tee /etc/systemd/system/tgnews.service > /dev/null <<EOF
 [Unit]
 Description=Telegram News Bot

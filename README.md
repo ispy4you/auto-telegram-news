@@ -318,13 +318,7 @@ Tables are created automatically on first run (`Base.metadata.create_all`).
 Start the app, then go to **Settings → Telegram account** in the admin UI and log in with a QR
 code or phone + code (2FA password too, if enabled) — right in the browser.
 
-A CLI fallback also still works, useful for headless setups:
-
-```bash
-python -m app.cli.init_telegram_session
-```
-
-Both store the session in the database rather than on disk: a hosted container is recreated on
+The session is stored in the database rather than on disk: a hosted container is recreated on
 every deploy, and a file-based session would mean scanning the QR code again after each one.
 `TELEGRAM_SESSION_PATH` is now only used to pick up a pre-existing file session and migrate it
 into the database, which happens automatically on first start.
@@ -435,10 +429,7 @@ pip install -r requirements.txt
 cp .env.example .env
 # edit .env: DATABASE_URL, APP_SECRET_KEY, ADMIN_PASSWORD, Telegram keys
 
-# 4. Telethon session (one-time, interactive)
-python -m app.cli.init_telegram_session
-
-# 5. systemd service
+# 4. systemd service
 sudo tee /etc/systemd/system/tgnews.service > /dev/null <<EOF
 [Unit]
 Description=Telegram News Bot
