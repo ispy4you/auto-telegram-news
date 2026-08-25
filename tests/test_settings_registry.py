@@ -71,3 +71,24 @@ def test_every_form_key_round_trips(db_session):
         raw = reg.normalize(key, str(reg.default(key)))
         reg.store(db_session, {key: raw})
         assert reg.get(key, db_session) is not None
+
+
+def test_reset_removes_the_override(db_session):
+    """Сохранённое значение переживает деплой — снять его можно только явно."""
+    _store(db_session, "semantic_threshold", "0")
+    assert reg.get("semantic_threshold", db_session) == 0
+
+    reg.reset(db_session, "semantic_threshold")
+
+    assert reg.get("semantic_threshold", db_session) == reg.DEFAULT_SEMANTIC_THRESHOLD
+
+
+def test_reset_is_harmless_when_there_is_no_override(db_session):
+    reg.reset(db_session, "semantic_threshold")
+
+    assert reg.get("semantic_threshold", db_session) == reg.DEFAULT_SEMANTIC_THRESHOLD
+
+
+def test_reset_of_unknown_key_is_rejected(db_session):
+    with pytest.raises(KeyError):
+        reg.reset(db_session, "не_существует")

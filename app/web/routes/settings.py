@@ -3,7 +3,7 @@ import urllib.parse
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -96,6 +96,30 @@ async def settings_save(
         if sched:
             try:
                 sched.update_interval(int(values["fetch_interval_seconds"]))
+            except Exception as exc:
+                logger.warning("Could not update scheduler interval: %s", exc)
+
+    return RedirectResponse(url="/settings", status_code=302)
+
+
+@router.post("/settings/reset")
+def settings_reset(
+    request: Request,
+    key: str = Form(...),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    """Снимает переопределение одной настройки, возвращая её к значению по умолчанию."""
+    try:
+        settings_registry.reset(db, key)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Неизвестная настройка: {key}")
+
+    if key == "fetch_interval_seconds":
+        sched = getattr(request.app.state, "scheduler", None)
+        if sched:
+            try:
+                sched.update_interval(settings_registry.get(key, db))
             except Exception as exc:
                 logger.warning("Could not update scheduler interval: %s", exc)
 
