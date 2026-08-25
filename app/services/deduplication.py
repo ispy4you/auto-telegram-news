@@ -11,6 +11,12 @@ from app.models import RawPost, RawPostStatus
 from app.services.text_cleanup import clean_telegram_rss_text
 
 
+# Косинус для paraphrase-multilingual-MiniLM: пересказ одной новости разными
+# источниками обычно даёт 0.85–0.95, разные новости на одну тему — 0.75–0.85.
+# 0.90 выбран консервативно: лучше пропустить повтор, чем склеить две разные новости.
+DEFAULT_SEMANTIC_THRESHOLD = 0.90
+
+
 class DeduplicationService:
     def __init__(self, threshold: int = 88):
         self.threshold = threshold
@@ -76,30 +82,32 @@ class DeduplicationService:
                 post.dedupe_score = float(score)
                 return post
 
-        # Phase 3: semantic similarity (optional, requires fastembed)
+        # Phase 3: semantic similarity (requires fastembed)
         try:
-            semantic_threshold = float(_get_setting(db, "semantic_threshold", "0"))
+            semantic_threshold = float(_get_setting(db, "semantic_threshold", str(DEFAULT_SEMANTIC_THRESHOLD)))
         except (ValueError, TypeError):
-            semantic_threshold = 0.0
+            semantic_threshold = DEFAULT_SEMANTIC_THRESHOLD
 
-        if semantic_threshold > 0:
-            from app.services import embedder as _emb
-            # Compute embedding for this post if not already stored
-            if post.embedding is None:
-                vec_json = _emb.embed_text_json(normalized)
-                if vec_json:
-                    post.embedding = vec_json
+        from app.services import embedder as _emb
 
-            if post.embedding:
-                post_vec = json.loads(post.embedding)
-                for candidate in candidates:
-                    if candidate.embedding:
-                        sim = _emb.cosine_similarity(post_vec, json.loads(candidate.embedding))
-                        if sim >= semantic_threshold:
-                            post.status = RawPostStatus.DUPLICATE.value
-                            post.duplicate_of_id = candidate.id
-                            post.dedupe_score = round(sim * 100, 2)
-                            return post
+        # Вектор считаем всегда, а не только при включённом пороге: иначе после
+        # включения семантики сравнивать оказывается не с чем — у постов в окне
+        # эмбеддингов нет, и фаза молча не работает, пока окно не обновится.
+        if post.embedding is None:
+            vec_json = _emb.embed_text_json(normalized)
+            if vec_json:
+                post.embedding = vec_json
+
+        if semantic_threshold > 0 and post.embedding:
+            post_vec = json.loads(post.embedding)
+            for candidate in candidates:
+                if candidate.embedding:
+                    sim = _emb.cosine_similarity(post_vec, json.loads(candidate.embedding))
+                    if sim >= semantic_threshold:
+                        post.status = RawPostStatus.DUPLICATE.value
+                        post.duplicate_of_id = candidate.id
+                        post.dedupe_score = round(sim * 100, 2)
+                        return post
 
         post.status = RawPostStatus.READY.value
         return post
