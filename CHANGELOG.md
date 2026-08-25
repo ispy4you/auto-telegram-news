@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.2.1...v1.3.0) (2026-08-25)
+
+
+### Features
+
+* enable semantic deduplication by default ([#20](https://github.com/ispy4you/auto-telegram-news/issues/20)) ([26908b9](https://github.com/ispy4you/auto-telegram-news/commit/26908b913daff116b3d80be50e44a4c5918b1234))
+* manage the database schema with Alembic ([#16](https://github.com/ispy4you/auto-telegram-news/issues/16)) ([d27b2af](https://github.com/ispy4you/auto-telegram-news/commit/d27b2af28c32976f6baa701451518744d247b969))
+* prune the action log and stop logging empty scheduler runs ([#19](https://github.com/ispy4you/auto-telegram-news/issues/19)) ([0cb1c88](https://github.com/ispy4you/auto-telegram-news/commit/0cb1c888c4bad242505abdb1ad212a133f884861))
+* refetch missing media from the source before publishing ([#21](https://github.com/ispy4you/auto-telegram-news/issues/21)) ([39637d1](https://github.com/ispy4you/auto-telegram-news/commit/39637d1d64bea2670051f3f474940fce7707d67d))
+* store the Telethon session in the database ([#11](https://github.com/ispy4you/auto-telegram-news/issues/11)) ([d52f093](https://github.com/ispy4you/auto-telegram-news/commit/d52f0935d47df3016ef0c5db0c43feb378a60e64))
+
+
+### Bug Fixes
+
+* accept non-ASCII passwords, and cover login and CSRF with tests ([#24](https://github.com/ispy4you/auto-telegram-news/issues/24)) ([ac9bbcb](https://github.com/ispy4you/auto-telegram-news/commit/ac9bbcb9422016abeb08fa11e77704e8e0bc4f40))
+* **docker:** force apt over IPv4 ([#14](https://github.com/ispy4you/auto-telegram-news/issues/14)) ([1a4f132](https://github.com/ispy4you/auto-telegram-news/commit/1a4f132be27275825104149640112bc9008d269c))
+* **docker:** retry apt downloads instead of failing the build ([#13](https://github.com/ispy4you/auto-telegram-news/issues/13)) ([e46c0f5](https://github.com/ispy4you/auto-telegram-news/commit/e46c0f57339de1be7fc866e473c290e2b12aac3c))
+* publish to every target channel, not only the first ([#25](https://github.com/ispy4you/auto-telegram-news/issues/25)) ([4c64bc1](https://github.com/ispy4you/auto-telegram-news/commit/4c64bc194b17ebf51eedb09a8d0e2bd797f75dc3))
+* reuse the listener's Telethon client when restoring media ([#26](https://github.com/ispy4you/auto-telegram-news/issues/26)) ([9437f31](https://github.com/ispy4you/auto-telegram-news/commit/9437f317367035f75e7d898c29bd686cd7c0ec98))
+* stop duplicate publications and make the retry limit work ([#15](https://github.com/ispy4you/auto-telegram-news/issues/15)) ([f5fbe12](https://github.com/ispy4you/auto-telegram-news/commit/f5fbe1211bba3488c9cef8b2aea899d3d443d07e))
+
 ## [1.2.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.2.0...v1.2.1) (2026-08-24)
 
 
