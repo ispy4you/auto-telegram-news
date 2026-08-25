@@ -3,7 +3,14 @@
 
 {% macro db_badge(key, env_hint) %}
   {% if key in cfg %}
-  <div class="form-text text-success"><i class="bi bi-database me-1"></i>Переопределено в БД{% if key in ('fetch_interval_seconds',) %} (применяется сразу){% endif %}</div>
+  <div class="form-text text-success d-flex align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-database me-1"></i>Переопределено в БД{% if key in ('fetch_interval_seconds',) %} (применяется сразу){% endif %}</span>
+    <button type="button" class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
+            style="font-size:inherit" data-reset-setting="{{ key }}"
+            title="Убрать переопределение и вернуться к значению по умолчанию">
+      <i class="bi bi-arrow-counterclockwise me-1"></i>сбросить
+    </button>
+  </div>
   {% else %}
   <div class="form-text text-muted"><i class="bi bi-box me-1"></i>{{ env_hint }}</div>
   {% endif %}
@@ -340,9 +347,7 @@
               0 — выключено. Рекомендуется <strong>0.85–0.90</strong>.
               Модель входит в образ, скачивать ничего не нужно.
             </div>
-            {% if cfg.get('semantic_threshold', '0.9') not in ('0', '0.0') %}
-            <div class="form-text text-success mt-1"><i class="bi bi-database me-1"></i>Включено ({{ cfg.get('semantic_threshold', '0.9') }})</div>
-            {% endif %}
+            {{ db_badge('semantic_threshold', 'Дефолт: 0.9') }}
           </div>
           <div class="col-md-8 d-flex align-items-end">
             <div class="alert alert-info py-2 px-3 mb-0" style="font-size:.82rem">
@@ -737,5 +742,27 @@
 })();
 </script>
 {% endif %}
+
+<script>
+// Сброс одной настройки. Кнопки лежат внутри формы настроек, поэтому это
+// именно fetch, а не вложенная форма: вложенные формы недопустимы.
+(() => {
+  const csrf = document.querySelector('input[name="csrf_token"]').value;
+  for (const btn of document.querySelectorAll('[data-reset-setting]')) {
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      try {
+        const body = new URLSearchParams({csrf_token: csrf, key: btn.dataset.resetSetting});
+        const r = await fetch('/settings/reset', {method: 'POST', body});
+        if (!r.ok) throw new Error(r.status);
+        location.reload();
+      } catch (_) {
+        btn.disabled = false;
+        alert('Не удалось сбросить настройку');
+      }
+    });
+  }
+})();
+</script>
 
 {% endblock %}

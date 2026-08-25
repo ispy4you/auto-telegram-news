@@ -145,3 +145,28 @@ def test_blank_secret_keeps_the_stored_value(client, db_session):
     })
 
     assert db_session.get(AppSetting, "telegram_bot_token").value == "секрет"
+
+
+def test_reset_returns_a_setting_to_its_default(client, db_session):
+    _login(client)
+    db_session.add(AppSetting(key="semantic_threshold", value="0"))
+    db_session.commit()
+
+    response = client.post("/settings/reset", data={
+        "csrf_token": _csrf(client, "/settings"),
+        "key": "semantic_threshold",
+    })
+
+    assert response.status_code == 302
+    assert db_session.get(AppSetting, "semantic_threshold") is None
+
+
+def test_reset_of_an_unknown_setting_is_refused(client):
+    _login(client)
+
+    response = client.post("/settings/reset", data={
+        "csrf_token": _csrf(client, "/settings"),
+        "key": "уронить_всё",
+    })
+
+    assert response.status_code == 400

@@ -159,6 +159,15 @@ def normalize(key: str, raw: str) -> str:
     return str(value)
 
 
+def reset(db: Session, key: str) -> None:
+    """Убирает переопределение: дальше для настройки действует значение по умолчанию."""
+    spec(key)
+    row = db.get(AppSetting, key)
+    if row:
+        db.delete(row)
+        db.commit()
+
+
 def store(db: Session, values: dict[str, str]) -> None:
     """Пишет уже нормализованные значения. Ключи вне реестра отвергаются."""
     for key, value in values.items():
