@@ -6,9 +6,9 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy import func, select
 
 from app.database import SessionLocal
-from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost, RawPostStatus
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost
 from app.services.news_pipeline import NewsPipelineService
-from app.services import settings_registry
+from app.services import post_lifecycle, settings_registry
 from app.services.retention import prune_action_logs
 from app.services.telegram_publisher import TelegramPublisherService
 
@@ -47,11 +47,7 @@ class SchedulerService:
             generated = db.get(GeneratedPost, job.generated_post_id)
             if not generated or generated.status == GeneratedPostStatus.PUBLISHED.value:
                 continue
-            generated.status = GeneratedPostStatus.APPROVED.value
-            generated.publish_error = None
-            raw = db.get(RawPost, generated.raw_post_id)
-            if raw:
-                raw.status = RawPostStatus.GENERATED.value
+            post_lifecycle.reset_for_retry(generated, db.get(RawPost, generated.raw_post_id))
             # Задачу не удаляем: publish_generated_post переиспользует её и
             # увеличит attempts, иначе лимит попыток никогда не сработает.
             db.flush()
@@ -76,7 +72,7 @@ class SchedulerService:
                 GeneratedPostStatus.APPROVED.value,
             ):
                 continue
-            generated.status = GeneratedPostStatus.APPROVED.value
+            post_lifecycle.approve(generated)
             target_channel_id = job.target_channel_id
             db.flush()
             try:

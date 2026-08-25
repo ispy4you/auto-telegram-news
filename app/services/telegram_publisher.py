@@ -9,8 +9,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.services import settings_registry
-from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPostStatus, TargetChannel
+from app.services import post_lifecycle, settings_registry
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, TargetChannel
 
 logger = logging.getLogger(__name__)
 
@@ -136,9 +136,7 @@ class TelegramPublisherService:
             if not _is_within_window(target.publish_from, target.publish_to, tz_name):
                 scheduled_at = _next_window_open_utc(target.publish_from, tz_name)
                 job = self._claim_job(db, generated_post_id, target_channel_id, PublishJobStatus.PENDING.value)
-                job.scheduled_at = scheduled_at
-                generated.status = GeneratedPostStatus.SCHEDULED.value
-                generated.target_channel_id = target_channel_id
+                post_lifecycle.schedule(generated, job, target_channel_id, scheduled_at)
                 db.add(ActionLog(
                     action="publish_scheduled",
                     entity_type="GeneratedPost",
@@ -220,20 +218,11 @@ class TelegramPublisherService:
                 db.commit()
                 await bot.send_message(chat_id=target.chat_id, text=text)
 
-            generated.status = GeneratedPostStatus.PUBLISHED.value
-            generated.telegram_message_id = sent_msg_id
-            generated.published_at = datetime.now(timezone.utc).replace(tzinfo=None)
-            generated.target_channel_id = target_channel_id
-            raw_post.status = RawPostStatus.PUBLISHED.value
-            job.status = PublishJobStatus.SUCCESS.value
+            post_lifecycle.mark_published(generated, raw_post, job, target_channel_id, sent_msg_id)
             db.add(ActionLog(action="publish_success", entity_type="GeneratedPost", entity_id=str(generated.id), message=f"Published to {target.chat_id}"))
             db.commit()
         except Exception as exc:
-            generated.status = GeneratedPostStatus.FAILED.value
-            generated.publish_error = str(exc)
-            raw_post.status = RawPostStatus.FAILED.value
-            job.status = PublishJobStatus.FAILED.value
-            job.last_error = str(exc)
+            post_lifecycle.mark_publish_failed(generated, raw_post, job, str(exc))
             db.add(ActionLog(action="publish_failed", entity_type="GeneratedPost", entity_id=str(generated.id), message=str(exc)))
             db.commit()
             raise
