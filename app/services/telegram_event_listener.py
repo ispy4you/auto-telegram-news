@@ -145,6 +145,9 @@ class TelegramEventListenerService:
                 "Telethon-сессия не авторизована. "
                 "Войдите в Telegram в админке."
             )
+        # Сбрасываем сразу: иначе после успешного входа флаг остался бы висеть,
+        # и первый же обрыв связи выглядел бы как «сессию отозвали».
+        self._needs_login = False
 
         me = await client.get_me()
         if getattr(me, "bot", False):

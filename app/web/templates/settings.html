@@ -540,6 +540,9 @@
   };
 
   let timer = null;
+  let pollMs = null;
+  let currentStep = null;
+  let successShown = false;
   let wizardOpen = false;
 
   const STATES = {
@@ -566,8 +569,11 @@
     errorBox.classList.toggle('d-none', !msg);
   }
 
-  function showStep(name) {
+  function showStep(name, focusId) {
+    if (currentStep === name) return;
+    currentStep = name;
     for (const [key, el] of Object.entries(steps)) el.classList.toggle('d-none', key !== name);
+    if (focusId) $(focusId).focus();
   }
 
   function button(label, cls, onClick) {
@@ -623,14 +629,18 @@
         $('tg-qr-box').innerHTML = `<img src="${d.qr_data_uri}" alt="QR-код для входа" width="220" height="220" class="border rounded p-2 bg-white">`;
       }
     } else if (d.state === 'code_sent') {
-      showStep('code');
-      $('tg-code-input').focus();
+      showStep('code', 'tg-code-input');
     } else if (d.state === 'password_needed') {
-      showStep('password');
-      $('tg-password-input').focus();
+      showStep('password', 'tg-password-input');
+    } else if (d.state === 'error' && wizardOpen) {
+      // Иначе на экране остаётся мёртвый QR рядом с сообщением об ошибке.
+      showStep('method');
     }
 
-    if (d.state === 'done' && d.account) {
+    // Состояние done держится на сервере до следующего входа, поэтому показываем
+    // подтверждение один раз, а не заново на каждом опросе.
+    if (d.state === 'done' && d.account && !successShown) {
+      successShown = true;
       wizardOpen = false;
       wizard.classList.add('d-none');
       stateActions.classList.remove('d-none');
@@ -647,16 +657,19 @@
   }
 
   function setPolling(ms) {
-    if (timer && timer._ms === ms) return;
+    // setInterval возвращает число, свойство на нём не сохранить — держим отдельно.
+    if (pollMs === ms) return;
     if (timer) clearInterval(timer);
     timer = setInterval(refresh, ms);
-    timer._ms = ms;
+    pollMs = ms;
   }
 
   function openWizard() {
     wizardOpen = true;
+    successShown = false;
     success.classList.add('d-none');
     showError(null);
+    currentStep = null;
     showStep('method');
     wizard.classList.remove('d-none');
     stateActions.classList.add('d-none');
@@ -686,8 +699,7 @@
     // Выбор другого способа отменяет начатый: одновременно они не работают.
     await post('/settings/telegram-login/cancel');
     wizardOpen = true;
-    showStep('phone');
-    $('tg-phone-input').focus();
+    showStep('phone', 'tg-phone-input');
   });
 
   $('tg-phone-submit').addEventListener('click', async () => {

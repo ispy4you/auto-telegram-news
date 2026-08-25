@@ -59,3 +59,11 @@ def test_account_is_shown_after_restart(service):
     status = service(session="abc", active=True).status()
 
     assert status["account"]["username"] == "ivan"
+
+
+def test_needs_login_starts_clean():
+    """Флаг живёт в памяти процесса: свежий слушатель не должен считать,
+    что вход уже требуется."""
+    from app.services.telegram_event_listener import TelegramEventListenerService
+
+    assert TelegramEventListenerService().needs_login is False
