@@ -56,8 +56,10 @@ def login_action(request: Request, username: str, password: str):
     if _is_locked_out(ip):
         return RedirectResponse(url="/login?error=locked", status_code=302)
 
-    username_ok = hmac.compare_digest(username, settings.admin_username)
-    password_ok = hmac.compare_digest(password, settings.admin_password)
+    # Сравниваем байты: compare_digest на строках падает с TypeError, если в них
+    # есть не-ASCII символы, то есть кириллический пароль ронял вход пятисоткой.
+    username_ok = hmac.compare_digest(username.encode("utf-8"), settings.admin_username.encode("utf-8"))
+    password_ok = hmac.compare_digest(password.encode("utf-8"), settings.admin_password.encode("utf-8"))
     if username_ok and password_ok:
         _clear_failures(ip)
         request.session[SESSION_KEY] = True
