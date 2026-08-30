@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
-from app.services import embedder, prompt_template, settings_registry
+from app.services import ai_prompt, embedder, prompt_template, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import get_display_timezone
 from app.web.auth import require_auth
@@ -51,6 +51,10 @@ def settings_page(
         "cfg": cfg,
         "env": env,
         "default_prompt": settings_registry.default("ai_prompt"),
+        # Скрытую часть промпта показываем целиком: описания словами мало,
+        # пока не видно, что именно уходит в модель помимо правил.
+        "auto_appendix": ai_prompt.appendix_example(),
+        "response_contract": ai_prompt.RESPONSE_CONTRACT,
         "media_size_mb": media_stats["size_mb"],
         "media_stats": media_stats,
         "ok": ok,
