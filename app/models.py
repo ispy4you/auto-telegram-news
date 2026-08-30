@@ -164,8 +164,8 @@ class GeneratedPost(Base):
     status: Mapped[str] = mapped_column(String(16), default=GeneratedPostStatus.DRAFT.value)
     generation_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    #: Оформить текст цитатой при отправке в Telegram.
-    as_blockquote: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Разметка отредактированного текста: JSON-список сущностей Telegram.
+    entities: Mapped[str | None] = mapped_column(Text, nullable=True)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

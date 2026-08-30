@@ -1,4 +1,3 @@
-import html
 import logging
 import zoneinfo
 from datetime import datetime, time, timedelta, timezone
@@ -10,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.services import post_lifecycle, settings_registry
+from app.services import message_entities, post_lifecycle, settings_registry
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, TargetChannel
 
 logger = logging.getLogger(__name__)
@@ -25,18 +24,6 @@ def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
         return from_t <= now <= to_t
     # overnight window: e.g. 22:00–06:00
     return now >= from_t or now <= to_t
-
-
-def _format_for_telegram(text: str, as_blockquote: bool) -> tuple[str, str | None]:
-    """Готовый к отправке текст и режим разбора.
-
-    Разметку в посте мы не поддерживаем и не хотим: включив HTML, пришлось бы
-    отвечать за каждый `<` и `&` в новости, иначе Telegram отвергает сообщение
-    целиком. Поэтому цитата — единственный тег, а сам текст экранируется.
-    """
-    if not as_blockquote:
-        return text, None
-    return f"<blockquote>{html.escape(text, quote=False)}</blockquote>", "HTML"
 
 
 def _next_window_open_utc(publish_from: str, tz_name: str) -> datetime:
@@ -144,9 +131,12 @@ class TelegramPublisherService:
         text = (generated.edited_text or generated.generated_text or "").strip()
         if not text:
             raise ValueError("Empty publish text")
-        # Длину для подписи считаем по исходному тексту: Telegram меряет
-        # разобранное сообщение, а не разметку вокруг него.
-        body, parse_mode = _format_for_telegram(text, bool(generated.as_blockquote))
+        # Разметка описывает отредактированный текст, поэтому к исходному
+        # тексту модели она неприменима — смещения указывали бы мимо.
+        stored = message_entities.loads(generated.entities) if generated.edited_text else []
+        entities = message_entities.to_aiogram(stored) or None
+        # Лимит подписи Telegram тоже считает в единицах UTF-16.
+        caption_fits = message_entities.utf16_len(text) <= 1024
 
         raw_post = generated.raw_post
         if not raw_post:
@@ -207,38 +197,40 @@ class TelegramPublisherService:
             tail_text_pending = False
 
             if sent_msg_id is not None:
-                await bot.send_message(chat_id=target.chat_id, text=body, parse_mode=parse_mode)
+                await bot.send_message(chat_id=target.chat_id, text=text, entities=entities)
             elif not existing_media:
-                msg = await bot.send_message(chat_id=target.chat_id, text=body, parse_mode=parse_mode)
+                msg = await bot.send_message(chat_id=target.chat_id, text=text, entities=entities)
                 sent_msg_id = msg.message_id
             elif len(existing_media) == 1:
                 m = existing_media[0]
                 file = FSInputFile(m.file_path)
-                caption = body if len(text) <= 1024 else None
+                caption = text if caption_fits else None
+                caption_entities = entities if caption_fits else None
                 if m.media_type == "video":
-                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, parse_mode=parse_mode)
+                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, caption_entities=caption_entities)
                 else:
-                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, parse_mode=parse_mode)
+                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, caption_entities=caption_entities)
                 sent_msg_id = msg.message_id
                 tail_text_pending = caption is None
             else:
-                use_caption = len(text) <= 1024
                 group = []
                 for idx, m in enumerate(existing_media):
                     file = FSInputFile(m.file_path)
-                    caption = body if idx == 0 and use_caption else None
+                    first = idx == 0 and caption_fits
+                    caption = text if first else None
+                    caption_entities = entities if first else None
                     if m.media_type == "video":
-                        group.append(InputMediaVideo(media=file, caption=caption, parse_mode=parse_mode))
+                        group.append(InputMediaVideo(media=file, caption=caption, caption_entities=caption_entities))
                     else:
-                        group.append(InputMediaPhoto(media=file, caption=caption, parse_mode=parse_mode))
+                        group.append(InputMediaPhoto(media=file, caption=caption, caption_entities=caption_entities))
                 msgs = await bot.send_media_group(chat_id=target.chat_id, media=group)
                 sent_msg_id = msgs[0].message_id if msgs else None
-                tail_text_pending = not use_caption
+                tail_text_pending = not caption_fits
 
             if tail_text_pending:
                 job.sent_message_id = sent_msg_id
                 db.commit()
-                await bot.send_message(chat_id=target.chat_id, text=body, parse_mode=parse_mode)
+                await bot.send_message(chat_id=target.chat_id, text=text, entities=entities)
 
             post_lifecycle.mark_published(generated, raw_post, job, target_channel_id, sent_msg_id)
             db.add(ActionLog(action="publish_success", entity_type="GeneratedPost", entity_id=str(generated.id), message=f"Published to {target.chat_id}"))
