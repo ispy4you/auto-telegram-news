@@ -268,29 +268,72 @@
         <span class="text-muted fw-normal small">— этот текст уходит в модель при каждой генерации</span>
       </div>
       <div class="card-body">
-        <label class="form-label">Правила для AI</label>
-        <textarea class="form-control" name="ai_prompt" id="ai-prompt" rows="14" style="font-size:.9rem">{{ cfg.get('ai_prompt', default_prompt) }}</textarea>
-        <div class="form-text">Пишите обычными словами — как объясняли бы редактору-новичку в первый день.</div>
+        <input type="hidden" name="ai_prompt_mode" id="prompt-mode" value="{{ prompt_mode }}">
+
+        <ul class="nav nav-pills mb-3" id="prompt-tabs" style="font-size:.9rem">
+          <li class="nav-item"><button type="button" class="nav-link py-1" data-prompt-mode="simple">Простой</button></li>
+          <li class="nav-item"><button type="button" class="nav-link py-1" data-prompt-mode="text">Текстом</button></li>
+        </ul>
+
+        {# ── Анкета ─────────────────────────────────────────────────── #}
+        <div id="prompt-simple" class="d-none">
+          <div class="row g-3">
+            {% for q in prompt_questions %}
+            <div class="col-md-6 col-lg-3">
+              <div class="form-label small fw-semibold mb-1">{{ q.label }}</div>
+              {% for opt in q.options %}
+              <div class="form-check">
+                <input class="form-check-input" type="radio" data-prompt-answer
+                       name="pf_{{ q.key }}" id="pf-{{ q.key }}-{{ opt.value }}" value="{{ opt.value }}"
+                       {% if prompt_answers[q.key] == opt.value %}checked{% endif %}>
+                <label class="form-check-label small" for="pf-{{ q.key }}-{{ opt.value }}">{{ opt.label }}</label>
+              </div>
+              {% endfor %}
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="mt-3">
+            <label class="form-label small fw-semibold mb-1" for="pf-extra">Особые пожелания</label>
+            <textarea class="form-control" name="pf_extra" id="pf-extra" rows="3" data-prompt-answer
+                      placeholder="Например: всегда упоминай город, о котором новость.">{{ prompt_answers.extra }}</textarea>
+          </div>
+
+          <div class="mt-3">
+            <div class="small fw-semibold text-muted mb-1">Вот что получится</div>
+            <pre class="border rounded bg-light p-3 small mb-0" id="prompt-composed" style="white-space:pre-wrap"></pre>
+          </div>
+        </div>
+
+        {# ── Свободный текст ────────────────────────────────────────── #}
+        <div id="prompt-text" class="d-none">
+          <label class="form-label" for="ai-prompt">Правила для AI</label>
+          <textarea class="form-control" name="ai_prompt" id="ai-prompt" rows="14" style="font-size:.9rem">{{ cfg.get('ai_prompt', default_prompt) }}</textarea>
+          <div class="form-text">Пишите обычными словами — как объясняли бы редактору-новичку в первый день.</div>
+        </div>
+
         {{ db_badge('ai_prompt', 'Используется текст по умолчанию') }}
 
+        {# ── Что уходит в модель помимо правил: только чтение ────────── #}
         <details class="mt-3">
-          <summary class="small text-muted" style="cursor:pointer">Что подставляется автоматически</summary>
+          <summary class="small text-muted" style="cursor:pointer">Что уходит в модель помимо ваших правил</summary>
           <div class="small text-muted mt-2">
-            К каждому запросу приклеиваются сами — писать их в правилах не нужно:
-            <ul class="mb-2 mt-1">
-              <li>текст исходной новости</li>
-              <li>название источника</li>
-              <li>дата публикации</li>
-              <li>есть ли у новости медиа</li>
-            </ul>
-            Если хотите поставить что-то в определённое место — напишите
+            Приклеивается к каждому запросу само. Здесь это только для справки — править нечего и не нужно.
+
+            <div class="fw-semibold mt-2 mb-1">Данные новости</div>
+            <pre class="border rounded bg-light p-3 mb-2 small" style="white-space:pre-wrap">{{ auto_appendix }}</pre>
+
+            <div class="fw-semibold mb-1">Формат ответа</div>
+            <pre class="border rounded bg-light p-3 mb-2 small" style="white-space:pre-wrap">{{ response_contract }}</pre>
+
+            Если хотите поставить данные новости в определённое место — напишите в правилах
             <code>{original_text}</code>, <code>{source_title}</code>,
             <code>{published_at_source}</code> или <code>{has_media}</code>:
-            данные встанут туда и второй раз не приедут.<br>
-            Формат ответа приложение просит у модели само, в правилах его описывать не надо.
+            тогда они встанут туда и второй раз не приедут.
           </div>
         </details>
 
+        {# ── Проверка ───────────────────────────────────────────────── #}
         <div class="border-top mt-3 pt-3">
           <div class="d-flex flex-wrap align-items-center gap-2">
             <button type="button" class="btn btn-outline-primary btn-sm" id="prompt-check">
@@ -300,9 +343,12 @@
               <i class="bi bi-arrow-repeat me-1"></i>ещё раз на другой новости
             </button>
           </div>
-          <div class="form-text">Прогоняет текст прямо из поля. Настройки не сохраняются, готовый пост никуда не записывается.</div>
+          <div class="form-text">Прогоняет текущие правила прямо сейчас. Настройки не сохраняются, готовый пост никуда не записывается.</div>
           <div id="prompt-result" class="d-none mt-3"></div>
         </div>
+
+        <script type="application/json" id="prompt-lines">{{ prompt_lines | tojson }}</script>
+        <script type="application/json" id="prompt-frame">{{ {"intro": prompt_intro, "outro": prompt_outro} | tojson }}</script>
       </div>
     </div>
   </div>
@@ -794,14 +840,73 @@
 </script>
 
 <script>
-// Проверка промпта: текст берём прямо из поля, ничего не сохраняя.
+// Правила для AI: анкета, свободный текст и проверка на живой новости.
 (() => {
+  const modeField = document.getElementById('prompt-mode');
+  if (!modeField) return;
+
+  const simple = document.getElementById('prompt-simple');
+  const asText = document.getElementById('prompt-text');
+  const field = document.getElementById('ai-prompt');
+  const composed = document.getElementById('prompt-composed');
+  const extra = document.getElementById('pf-extra');
+  const lines = JSON.parse(document.getElementById('prompt-lines').textContent);
+  const frame = JSON.parse(document.getElementById('prompt-frame').textContent);
+  const csrf = document.querySelector('input[name="csrf_token"]').value;
+
+  // Склейку браузер повторяет, а тексты берёт с сервера: иначе предпросмотр
+  // и сохранённые правила разъедутся на первой же правке формулировки.
+  function compose() {
+    const chosen = [];
+    for (const key of Object.keys(lines)) {
+      const picked = document.querySelector('input[name="pf_' + key + '"]:checked');
+      const line = picked ? lines[key][picked.value] : '';
+      if (line) chosen.push(line);
+    }
+    const parts = [frame.intro, chosen.join('\n'), frame.outro];
+    const wishes = (extra.value || '').trim();
+    if (wishes) parts.push(wishes);
+    return parts.join('\n\n');
+  }
+
+  const currentPrompt = () => (modeField.value === 'simple' ? compose() : field.value);
+
+  function setMode(mode) {
+    modeField.value = mode;
+    simple.classList.toggle('d-none', mode !== 'simple');
+    asText.classList.toggle('d-none', mode === 'simple');
+    for (const tab of document.querySelectorAll('[data-prompt-mode]')) {
+      tab.classList.toggle('active', tab.dataset.promptMode === mode);
+    }
+  }
+
+  for (const tab of document.querySelectorAll('[data-prompt-mode]')) {
+    tab.addEventListener('click', () => {
+      const mode = tab.dataset.promptMode;
+      if (mode === modeField.value) return;
+      if (mode === 'text') {
+        // Переносим собранный текст, чтобы правку начинать не с чистого листа.
+        field.value = compose();
+      } else if (field.value.trim() !== compose().trim()
+                 && !confirm('Правки, сделанные текстом, потеряются. Вернуться к анкете?')) {
+        return;
+      }
+      setMode(mode);
+    });
+  }
+
+  for (const input of document.querySelectorAll('[data-prompt-answer]')) {
+    input.addEventListener('input', () => { composed.textContent = compose(); });
+    input.addEventListener('change', () => { composed.textContent = compose(); });
+  }
+
+  composed.textContent = compose();
+  setMode(modeField.value === 'simple' ? 'simple' : 'text');
+
+  // ── Проверка на свежей новости ────────────────────────────────────
   const btn = document.getElementById('prompt-check');
-  if (!btn) return;
   const next = document.getElementById('prompt-check-next');
   const box = document.getElementById('prompt-result');
-  const field = document.getElementById('ai-prompt');
-  const csrf = document.querySelector('input[name="csrf_token"]').value;
   let offset = 0;
 
   const esc = (value) => String(value == null ? '' : value)
@@ -831,14 +936,14 @@
     next.classList.remove('d-none');
     const post = data.post;
     box.innerHTML =
-      '<div class="small text-muted mb-1">Новость #' + esc(post.id) + ' \u2014 ' + esc(post.source)
+      '<div class="small text-muted mb-1">Новость #' + esc(post.id) + ' — ' + esc(post.source)
         + (post.published_at ? ', ' + esc(post.published_at) : '') + '</div>'
       + '<div class="border-start border-3 ps-2 mb-3 small text-muted" style="white-space:pre-wrap">'
-        + esc(post.excerpt) + (post.truncated ? '\u2026' : '') + '</div>'
+        + esc(post.excerpt) + (post.truncated ? '…' : '') + '</div>'
       + outcome(data)
       + '<div class="form-text mt-2">модель: ' + esc(data.model)
-        + (data.finish_reason ? ' \u00b7 finish_reason: ' + esc(data.finish_reason) : '')
-        + ' \u00b7 ' + esc(data.elapsed) + '\u00a0с</div>';
+        + (data.finish_reason ? ' · finish_reason: ' + esc(data.finish_reason) : '')
+        + ' · ' + esc(data.elapsed) + ' с</div>';
   }
 
   async function run() {
@@ -846,9 +951,9 @@
     next.disabled = true;
     box.classList.remove('d-none');
     box.innerHTML = '<div class="text-muted small">'
-      + '<span class="spinner-border spinner-border-sm me-2"></span>Спрашиваем модель\u2026</div>';
+      + '<span class="spinner-border spinner-border-sm me-2"></span>Спрашиваем модель…</div>';
     try {
-      const body = new URLSearchParams({csrf_token: csrf, prompt: field.value, offset: String(offset)});
+      const body = new URLSearchParams({csrf_token: csrf, prompt: currentPrompt(), offset: String(offset)});
       const response = await fetch('/settings/prompt-preview', {method: 'POST', body});
       if (!response.ok) throw new Error('HTTP ' + response.status);
       render(await response.json());

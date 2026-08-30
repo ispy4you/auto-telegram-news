@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
-from app.services import embedder, prompt_template, settings_registry
+from app.services import ai_prompt, embedder, prompt_form, prompt_template, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import get_display_timezone
 from app.web.auth import require_auth
@@ -51,6 +51,16 @@ def settings_page(
         "cfg": cfg,
         "env": env,
         "default_prompt": settings_registry.default("ai_prompt"),
+        # Анкету видит тот, кто ещё не правил промпт руками: иначе она молча
+        # затрёт чужую работу при первом же сохранении.
+        "prompt_mode": cfg.get("ai_prompt_mode") or ("text" if "ai_prompt" in cfg else "simple"),
+        "prompt_questions": prompt_form.QUESTIONS,
+        "prompt_answers": prompt_form.loads(cfg.get("ai_prompt_form")),
+        "prompt_lines": prompt_form.lines_for_browser(),
+        "prompt_intro": prompt_form.INTRO,
+        "prompt_outro": prompt_form.OUTRO,
+        "auto_appendix": ai_prompt.appendix_example(),
+        "response_contract": ai_prompt.RESPONSE_CONTRACT,
         "media_size_mb": media_stats["size_mb"],
         "media_stats": media_stats,
         "ok": ok,
@@ -94,6 +104,14 @@ async def settings_save(
             # Форма не перерисовывает секреты: пустое поле значит «оставить как есть».
             continue
         values[key] = settings_registry.normalize(key, str(submitted))
+
+    if str(form.get("ai_prompt_mode") or "") == "simple":
+        # В простом режиме правила собирает анкета: текстовое поле в этот момент
+        # показывает прошлый вариант и перетирать им ответы нельзя.
+        answers = {q.key: str(form.get("pf_" + q.key) or "") for q in prompt_form.QUESTIONS}
+        answers["extra"] = str(form.get("pf_extra") or "")
+        values["ai_prompt"] = prompt_form.compose(answers)
+        values["ai_prompt_form"] = prompt_form.dumps(answers)
 
     settings_registry.store(db, values)
 
@@ -194,6 +212,11 @@ def settings_reset(
     """Снимает переопределение одной настройки, возвращая её к значению по умолчанию."""
     try:
         settings_registry.reset(db, key)
+        if key == "ai_prompt":
+            # Ответы анкеты и режим — часть тех же правил. Оставить их значило бы
+            # показывать в форме одно, а слать в модель другое.
+            for related in ("ai_prompt_form", "ai_prompt_mode"):
+                settings_registry.reset(db, related)
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Неизвестная настройка: {key}")
 

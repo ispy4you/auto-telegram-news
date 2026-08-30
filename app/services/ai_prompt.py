@@ -56,3 +56,17 @@ def build_user_message(rules: str, values: dict[str, str]) -> str:
         parts.append('Исходный текст:\n"""\n' + (values.get("original_text") or "") + '\n"""')
 
     return "\n\n".join(part for part in parts if part)
+
+
+#: Пример для формы настроек: показать, что именно приклеивается к правилам.
+SAMPLE_VALUES = {
+    "source_title": "РИА Новости",
+    "published_at_source": "2026-08-30 09:15",
+    "original_text": "…полный текст исходной новости…",
+    "has_media": "да",
+}
+
+
+def appendix_example() -> str:
+    """Что уходит в модель помимо правил, если плейсхолдеры не расставлены."""
+    return build_user_message("", SAMPLE_VALUES)

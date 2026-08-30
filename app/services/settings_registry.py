@@ -73,6 +73,8 @@ REGISTRY: dict[str, Setting] = {s.key: s for s in [
 
     # ── AI
     Setting("ai_prompt", STR, DEFAULT_AI_PROMPT),
+    Setting("ai_prompt_mode", STR, "simple", strip=True),
+    Setting("ai_prompt_form", STR, "{}"),
     Setting("timeweb_ai_gateway_base_url", STR, lambda e: e.timeweb_ai_gateway_base_url or "", strip=True),
     Setting("timeweb_ai_gateway_api_key", STR, lambda e: e.timeweb_ai_gateway_api_key or "", strip=True, secret=True),
     Setting("timeweb_ai_gateway_model", STR, lambda e: e.timeweb_ai_gateway_model or "", strip=True),
