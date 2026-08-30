@@ -5,11 +5,19 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models import RawPost
-from app.services import settings_registry
+from app.services import prompt_template, settings_registry
 from app.services.prompt_settings import get_ai_system_prompt, get_ai_user_prompt_template
 
 
 PROMPT_VERSION = "v1"
+
+
+class GenerationFailed(RuntimeError):
+    """Генерация сорвалась по технической причине: шлюз, сеть или сам промпт.
+
+    Отличается от «новость не подходит» тем, что пост остаётся нетронутым:
+    причину можно устранить и попробовать снова.
+    """
 
 
 @dataclass
@@ -27,12 +35,12 @@ class AiGatewayClient:
     def _build_messages(self, raw_post: RawPost, db: Session | None = None) -> list[dict]:
         system_prompt = get_ai_system_prompt(db)
         user_template = get_ai_user_prompt_template(db)
-        user_prompt = user_template.format(
-            source_title=raw_post.source.title if raw_post.source else "Unknown",
-            published_at_source=raw_post.published_at_source or "неизвестно",
-            original_text=raw_post.original_text or "",
-            has_media="да" if raw_post.has_media else "нет",
-        )
+        user_prompt = prompt_template.render(user_template, {
+            "source_title": raw_post.source.title if raw_post.source else "Unknown",
+            "published_at_source": raw_post.published_at_source or "неизвестно",
+            "original_text": raw_post.original_text or "",
+            "has_media": "да" if raw_post.has_media else "нет",
+        })
         return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
 
     async def generate_news_post(self, raw_post: RawPost, db: Session | None = None) -> AiResult:
@@ -46,13 +54,18 @@ class AiGatewayClient:
         max_tokens = settings_registry.get("ai_max_tokens", db)
         timeout_seconds = settings_registry.get("ai_timeout_seconds", db)
 
+        try:
+            messages = self._build_messages(raw_post, db)
+        except Exception as exc:
+            return AiResult(False, "", f"Не удалось собрать промпт: {type(exc).__name__}: {exc}", model, failed=True)
+
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
         payload = {
             "model": model,
-            "messages": self._build_messages(raw_post, db),
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
             "response_format": {"type": "json_object"},

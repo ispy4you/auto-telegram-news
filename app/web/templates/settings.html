@@ -25,6 +25,7 @@
 </div>
 
 {% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if warn %}<div class="alert alert-warning alert-dismissible"><i class="bi bi-exclamation-triangle me-2"></i><strong>Настройки сохранены, но в шаблоне промпта есть спорные места.</strong><div class="small mt-1">{{ warn }}</div><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
 
 <form method="post" action="/settings">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -271,7 +272,10 @@
         </div>
         <div>
           <label class="form-label">Шаблон пользовательского промпта</label>
-          <p class="text-muted small mb-1">Плейсхолдеры: <code>{source_title}</code> <code>{published_at_source}</code> <code>{original_text}</code> <code>{has_media}</code></p>
+          <p class="text-muted small mb-1">
+            Плейсхолдеры: <code>{source_title}</code> <code>{published_at_source}</code> <code>{original_text}</code> <code>{has_media}</code><br>
+            Остальной текст уходит в модель как есть — фигурные скобки, JSON-примеры и вложенные кавычки писать можно.
+          </p>
           <textarea class="form-control font-monospace" name="ai_prompt_template" rows="14" style="font-size:.85rem">{{ cfg.get('ai_prompt_template', default_user_prompt) }}</textarea>
           {{ db_badge('ai_prompt_template', 'Используется дефолтный шаблон из кода') }}
         </div>

@@ -1,4 +1,5 @@
 import urllib.parse
+from dataclasses import replace
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.database import SessionLocal, get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
 from app.services import post_lifecycle
-from app.services.ai_gateway import AiGatewayClient
+from app.services.ai_gateway import AiGatewayClient, AiResult, GenerationFailed
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
@@ -71,17 +72,30 @@ def posts(
     })
 
 
-async def _generate_single_post(post: RawPost, db: Session) -> None:
+async def _request_generation(post: RawPost, db: Session) -> AiResult:
+    """Спрашивает модель и отделяет отказ редактора от поломки.
+
+    Техническую ошибку — недоступный шлюз, сломанный шаблон промпта — поднимаем
+    наверх и пост не трогаем: раньше такая ошибка отклоняла новость навсегда,
+    хотя после починки причины её достаточно сгенерировать заново.
+    """
     result = await AiGatewayClient().generate_news_post(post, db)
+    if result.failed:
+        db.add(ActionLog(action="ai_error", entity_type="RawPost", entity_id=str(post.id), message=result.reason[:500]))
+        db.commit()
+        raise GenerationFailed(result.reason)
 
     if result.suitable and not result.text.strip():
-        result = result.__class__(
+        return replace(
+            result,
             suitable=False,
             text="",
             reason="AI вернул пустой текст — возможно, обрезан лимитом токенов или промпт не дал результата",
-            model_name=result.model_name,
         )
+    return result
 
+
+def _save_generation(post: RawPost, result: AiResult, db: Session) -> None:
     db.add(GeneratedPost(
         raw_post_id=post.id,
         generated_text=result.text,
@@ -98,12 +112,20 @@ async def _generate_single_post(post: RawPost, db: Session) -> None:
     db.commit()
 
 
+async def _generate_single_post(post: RawPost, db: Session) -> None:
+    _save_generation(post, await _request_generation(post, db), db)
+
+
 async def _bulk_generate_task(ids: list[int]) -> None:
     with SessionLocal() as db:
         posts_q = db.scalars(select(RawPost).where(RawPost.id.in_(ids))).all()
         for p in posts_q:
             try:
                 await _generate_single_post(p, db)
+            except GenerationFailed:
+                # Причина одна на всю пачку — она уже в журнале как ai_error,
+                # а остальные посты незачем прогонять по тем же граблям.
+                break
             except Exception as exc:
                 db.add(ActionLog(action="bulk_generate_error", entity_type="RawPost", entity_id=str(p.id), message=str(exc)))
                 db.commit()
@@ -146,7 +168,7 @@ async def posts_fetch_now(db: Session = Depends(get_db), _: bool = Depends(requi
 
 
 @router.get("/posts/{post_id}")
-def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), err: str | None = None):
     post = db.scalar(
         select(RawPost)
         .options(joinedload(RawPost.source), selectinload(RawPost.media_items), selectinload(RawPost.generated_posts))
@@ -159,7 +181,7 @@ def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _
     if pid is not None:
         tgt_q = tgt_q.where(TargetChannel.project_id == pid)
     targets = db.scalars(tgt_q).all()
-    return tpl(request, "post_detail.html", db, {"post": post, "targets": targets})
+    return tpl(request, "post_detail.html", db, {"post": post, "targets": targets, "err": err})
 
 
 async def _do_generate(post_id: int, db: Session) -> None:
@@ -169,10 +191,20 @@ async def _do_generate(post_id: int, db: Session) -> None:
     await _generate_single_post(post, db)
 
 
+def _back_to_post(post_id: int, error: str | None = None) -> RedirectResponse:
+    url = f"/posts/{post_id}"
+    if error:
+        url += "?err=" + urllib.parse.quote(error[:400])
+    return RedirectResponse(url=url, status_code=302)
+
+
 @router.post("/posts/{post_id}/generate")
 async def generate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    await _do_generate(post_id, db)
-    return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
+    try:
+        await _do_generate(post_id, db)
+    except GenerationFailed as exc:
+        return _back_to_post(post_id, str(exc))
+    return _back_to_post(post_id)
 
 
 @router.post("/posts/{post_id}/edit-draft")
@@ -194,6 +226,17 @@ def edit_draft(post_id: int, db: Session = Depends(get_db), _: bool = Depends(re
 
 @router.post("/posts/{post_id}/regenerate")
 async def regenerate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    post = db.get(RawPost, post_id)
+    if not post:
+        return RedirectResponse(url="/posts", status_code=302)
+
+    # Сначала новый текст, потом отказ от старого: иначе сорвавшаяся генерация
+    # оставляла пост вообще без черновика.
+    try:
+        result = await _request_generation(post, db)
+    except GenerationFailed as exc:
+        return _back_to_post(post_id, str(exc))
+
     existing_drafts = db.scalars(
         select(GeneratedPost).where(
             GeneratedPost.raw_post_id == post_id,
@@ -203,8 +246,8 @@ async def regenerate_post(post_id: int, db: Session = Depends(get_db), _: bool =
     for gp in existing_drafts:
         gp.status = GeneratedPostStatus.REJECTED.value
     db.flush()
-    await _do_generate(post_id, db)
-    return RedirectResponse(url=f"/posts/{post_id}", status_code=302)
+    _save_generation(post, result, db)
+    return _back_to_post(post_id)
 
 
 @router.post("/posts/{post_id}/publish-raw")
