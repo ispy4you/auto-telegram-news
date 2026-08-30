@@ -6,8 +6,8 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models import RawPost
-from app.services import prompt_template, settings_registry
-from app.services.prompt_settings import get_ai_system_prompt, get_ai_user_prompt_template
+from app.services import ai_prompt, settings_registry
+from app.services.prompt_settings import get_ai_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -32,21 +32,39 @@ class AiResult:
     # True — шлюз не ответил или ответил мусором. Это не «новость не подходит»:
     # пост нужно не отклонять, а обработать заново на следующем прогоне.
     failed: bool = False
+    #: Почему модель остановилась: пригодилось проверке промпта в настройках.
+    finish_reason: str = ""
 
 
 class AiGatewayClient:
-    def _build_messages(self, raw_post: RawPost, db: Session | None = None) -> list[dict]:
-        system_prompt = get_ai_system_prompt(db)
-        user_template = get_ai_user_prompt_template(db)
-        user_prompt = prompt_template.render(user_template, {
-            "source_title": raw_post.source.title if raw_post.source else "Unknown",
-            "published_at_source": raw_post.published_at_source or "неизвестно",
-            "original_text": raw_post.original_text or "",
-            "has_media": "да" if raw_post.has_media else "нет",
-        })
-        return [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt}]
+    def _build_messages(
+        self,
+        raw_post: RawPost,
+        db: Session | None = None,
+        rules: str | None = None,
+    ) -> list[dict]:
+        """rules задаётся только проверкой промпта из настроек: там текст берут
+        прямо из поля, не сохраняя его."""
+        user_prompt = ai_prompt.build_user_message(
+            get_ai_prompt(db) if rules is None else rules,
+            {
+                "source_title": raw_post.source.title if raw_post.source else "Unknown",
+                "published_at_source": raw_post.published_at_source or "неизвестно",
+                "original_text": raw_post.original_text or "",
+                "has_media": "да" if raw_post.has_media else "нет",
+            },
+        )
+        return [
+            {"role": "system", "content": ai_prompt.RESPONSE_CONTRACT},
+            {"role": "user", "content": user_prompt},
+        ]
 
-    async def generate_news_post(self, raw_post: RawPost, db: Session | None = None) -> AiResult:
+    async def generate_news_post(
+        self,
+        raw_post: RawPost,
+        db: Session | None = None,
+        rules: str | None = None,
+    ) -> AiResult:
         base_url = settings_registry.get("timeweb_ai_gateway_base_url", db)
         api_key = settings_registry.get("timeweb_ai_gateway_api_key", db)
         model = settings_registry.get("timeweb_ai_gateway_model", db)
@@ -58,7 +76,7 @@ class AiGatewayClient:
         timeout_seconds = settings_registry.get("ai_timeout_seconds", db)
 
         try:
-            messages = self._build_messages(raw_post, db)
+            messages = self._build_messages(raw_post, db, rules)
         except Exception as exc:
             return AiResult(False, "", f"Не удалось собрать промпт: {type(exc).__name__}: {exc}", model, failed=True)
 
@@ -94,7 +112,7 @@ class AiGatewayClient:
                 "Пустой ответ шлюза: model=%s finish_reason=%s usage=%s поля ответа=%s",
                 model, finish, data.get("usage"), sorted(message),
             )
-            return AiResult(False, "", self._describe_empty(finish, message, max_tokens), model, failed=True)
+            return AiResult(False, "", self._describe_empty(finish, message, max_tokens), model, failed=True, finish_reason=finish)
 
         parsed = self._parse_json(content)
         if parsed is None:
@@ -102,9 +120,12 @@ class AiGatewayClient:
             return AiResult(
                 False, "",
                 f"AI вернул не-JSON ответ (finish_reason={finish}): {content[:300]}",
-                model, failed=True,
+                model, failed=True, finish_reason=finish,
             )
-        return AiResult(bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""), model)
+        return AiResult(
+            bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""),
+            model, finish_reason=finish,
+        )
 
     @staticmethod
     def _describe_empty(finish: str, message: dict, max_tokens: int) -> str:

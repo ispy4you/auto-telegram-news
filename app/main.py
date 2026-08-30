@@ -13,7 +13,6 @@ from app.database import SessionLocal
 from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
 from app.migrations import run_migrations
 from app.services import telegram_session_store
-from app.services.prompt_settings import ensure_default_prompt_settings
 from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
 from app.services.telegram_login import TelegramLoginService
@@ -43,10 +42,6 @@ def _bootstrap() -> None:
     """
     settings.media_root.mkdir(parents=True, exist_ok=True)
     run_migrations()
-
-    with SessionLocal() as db:
-        ensure_default_prompt_settings(db)
-        db.commit()
 
     # Установки, логинившиеся до переезда сессии в БД, переносим автоматически.
     telegram_session_store.migrate_legacy_file(settings.telegram_session_path)

@@ -40,19 +40,19 @@ def test_prompt_with_json_example_saves_without_a_warning(logged_in, csrf, db_se
 
     response = logged_in.post("/settings", data={
         "csrf_token": csrf(logged_in, "/settings"),
-        "ai_prompt_template": template,
+        "ai_prompt": template,
     })
 
     assert response.status_code == 302
     assert "warn=" not in response.headers["location"]
     from app.services import settings_registry
-    assert settings_registry.get("ai_prompt_template", db_session) == template
+    assert settings_registry.get("ai_prompt", db_session) == template
 
 
 def test_typo_in_a_placeholder_is_reported_but_still_saved(logged_in, csrf):
     response = logged_in.post("/settings", data={
         "csrf_token": csrf(logged_in, "/settings"),
-        "ai_prompt_template": "Напиши пост про {text}",
+        "ai_prompt": "Напиши пост про {text}",
     })
 
     assert response.status_code == 302

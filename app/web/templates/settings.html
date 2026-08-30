@@ -25,7 +25,7 @@
 </div>
 
 {% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
-{% if warn %}<div class="alert alert-warning alert-dismissible"><i class="bi bi-exclamation-triangle me-2"></i><strong>Настройки сохранены, но в шаблоне промпта есть спорные места.</strong><div class="small mt-1">{{ warn }}</div><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if warn %}<div class="alert alert-warning alert-dismissible"><i class="bi bi-exclamation-triangle me-2"></i><strong>Настройки сохранены, но в правилах для AI есть спорные места.</strong><div class="small mt-1">{{ warn }}</div><button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
 
 <form method="post" action="/settings">
 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -260,24 +260,48 @@
     </div>
   </div>
 
-  {# AI промпты #}
+  {# Правила для AI #}
   <div class="col-12">
     <div class="card">
-      <div class="card-header bg-white fw-semibold">Промпты</div>
+      <div class="card-header bg-white fw-semibold">
+        Как AI пишет посты
+        <span class="text-muted fw-normal small">— этот текст уходит в модель при каждой генерации</span>
+      </div>
       <div class="card-body">
-        <div class="mb-3">
-          <label class="form-label">Системный промпт</label>
-          <textarea class="form-control font-monospace" name="ai_system_prompt" rows="8" style="font-size:.85rem">{{ cfg.get('ai_system_prompt', default_system_prompt) }}</textarea>
-          {{ db_badge('ai_system_prompt', 'Используется дефолтный промпт из кода') }}
-        </div>
-        <div>
-          <label class="form-label">Шаблон пользовательского промпта</label>
-          <p class="text-muted small mb-1">
-            Плейсхолдеры: <code>{source_title}</code> <code>{published_at_source}</code> <code>{original_text}</code> <code>{has_media}</code><br>
-            Остальной текст уходит в модель как есть — фигурные скобки, JSON-примеры и вложенные кавычки писать можно.
-          </p>
-          <textarea class="form-control font-monospace" name="ai_prompt_template" rows="14" style="font-size:.85rem">{{ cfg.get('ai_prompt_template', default_user_prompt) }}</textarea>
-          {{ db_badge('ai_prompt_template', 'Используется дефолтный шаблон из кода') }}
+        <label class="form-label">Правила для AI</label>
+        <textarea class="form-control" name="ai_prompt" id="ai-prompt" rows="14" style="font-size:.9rem">{{ cfg.get('ai_prompt', default_prompt) }}</textarea>
+        <div class="form-text">Пишите обычными словами — как объясняли бы редактору-новичку в первый день.</div>
+        {{ db_badge('ai_prompt', 'Используется текст по умолчанию') }}
+
+        <details class="mt-3">
+          <summary class="small text-muted" style="cursor:pointer">Что подставляется автоматически</summary>
+          <div class="small text-muted mt-2">
+            К каждому запросу приклеиваются сами — писать их в правилах не нужно:
+            <ul class="mb-2 mt-1">
+              <li>текст исходной новости</li>
+              <li>название источника</li>
+              <li>дата публикации</li>
+              <li>есть ли у новости медиа</li>
+            </ul>
+            Если хотите поставить что-то в определённое место — напишите
+            <code>{original_text}</code>, <code>{source_title}</code>,
+            <code>{published_at_source}</code> или <code>{has_media}</code>:
+            данные встанут туда и второй раз не приедут.<br>
+            Формат ответа приложение просит у модели само, в правилах его описывать не надо.
+          </div>
+        </details>
+
+        <div class="border-top mt-3 pt-3">
+          <div class="d-flex flex-wrap align-items-center gap-2">
+            <button type="button" class="btn btn-outline-primary btn-sm" id="prompt-check">
+              <i class="bi bi-play-circle me-1"></i>Проверить на свежей новости
+            </button>
+            <button type="button" class="btn btn-link btn-sm text-muted text-decoration-none d-none" id="prompt-check-next">
+              <i class="bi bi-arrow-repeat me-1"></i>ещё раз на другой новости
+            </button>
+          </div>
+          <div class="form-text">Прогоняет текст прямо из поля. Настройки не сохраняются, готовый пост никуда не записывается.</div>
+          <div id="prompt-result" class="d-none mt-3"></div>
         </div>
       </div>
     </div>
@@ -766,6 +790,79 @@
       }
     });
   }
+})();
+</script>
+
+<script>
+// Проверка промпта: текст берём прямо из поля, ничего не сохраняя.
+(() => {
+  const btn = document.getElementById('prompt-check');
+  if (!btn) return;
+  const next = document.getElementById('prompt-check-next');
+  const box = document.getElementById('prompt-result');
+  const field = document.getElementById('ai-prompt');
+  const csrf = document.querySelector('input[name="csrf_token"]').value;
+  let offset = 0;
+
+  const esc = (value) => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  function outcome(data) {
+    if (data.failed) {
+      return '<div class="alert alert-danger mb-0"><div class="fw-semibold">Модель не ответила</div>'
+        + '<div class="small mt-1">' + esc(data.reason) + '</div></div>';
+    }
+    if (!data.suitable) {
+      return '<div class="alert alert-secondary mb-0"><div class="fw-semibold">Новость отклонена</div>'
+        + '<div class="small mt-1">' + (esc(data.reason) || 'причина не указана') + '</div></div>';
+    }
+    return '<div class="border rounded p-3 bg-white">'
+      + '<div class="fw-semibold small text-muted mb-2">Готовый пост</div>'
+      + '<div style="white-space:pre-wrap">' + esc(data.text) + '</div></div>';
+  }
+
+  function render(data) {
+    if (!data.ok) {
+      next.classList.add('d-none');
+      box.innerHTML = '<div class="alert alert-warning mb-0">' + esc(data.error) + '</div>';
+      return;
+    }
+    offset = data.offset;
+    next.classList.remove('d-none');
+    const post = data.post;
+    box.innerHTML =
+      '<div class="small text-muted mb-1">Новость #' + esc(post.id) + ' \u2014 ' + esc(post.source)
+        + (post.published_at ? ', ' + esc(post.published_at) : '') + '</div>'
+      + '<div class="border-start border-3 ps-2 mb-3 small text-muted" style="white-space:pre-wrap">'
+        + esc(post.excerpt) + (post.truncated ? '\u2026' : '') + '</div>'
+      + outcome(data)
+      + '<div class="form-text mt-2">модель: ' + esc(data.model)
+        + (data.finish_reason ? ' \u00b7 finish_reason: ' + esc(data.finish_reason) : '')
+        + ' \u00b7 ' + esc(data.elapsed) + '\u00a0с</div>';
+  }
+
+  async function run() {
+    btn.disabled = true;
+    next.disabled = true;
+    box.classList.remove('d-none');
+    box.innerHTML = '<div class="text-muted small">'
+      + '<span class="spinner-border spinner-border-sm me-2"></span>Спрашиваем модель\u2026</div>';
+    try {
+      const body = new URLSearchParams({csrf_token: csrf, prompt: field.value, offset: String(offset)});
+      const response = await fetch('/settings/prompt-preview', {method: 'POST', body});
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      render(await response.json());
+    } catch (error) {
+      box.innerHTML = '<div class="alert alert-danger mb-0">Не удалось выполнить проверку: '
+        + esc(error.message) + '</div>';
+    } finally {
+      btn.disabled = false;
+      next.disabled = false;
+    }
+  }
+
+  btn.addEventListener('click', () => { offset = 0; run(); });
+  next.addEventListener('click', () => { offset += 1; run(); });
 })();
 </script>
 
