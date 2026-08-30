@@ -12,6 +12,9 @@
 
 from datetime import datetime, timezone
 
+from sqlalchemy import update
+from sqlalchemy.orm import Session
+
 from app.models import (
     GeneratedPost,
     GeneratedPostStatus,
@@ -91,3 +94,28 @@ def reset_for_retry(generated: GeneratedPost, raw_post: RawPost | None) -> None:
     generated.publish_error = None
     if raw_post is not None:
         raw_post.status = RawPostStatus.GENERATED.value
+
+
+def delete_posts(db: Session, posts: list[RawPost]) -> int:
+    """Удаляет посты вместе со всем, что на них завязано.
+
+    Дубликат ссылается на оригинал через duplicate_of_id, но связи этой нет
+    в моделях — только внешний ключ в базе. Поэтому SQLAlchemy о ней не знал
+    и удалял оригинал напрямую, а Postgres отвечал нарушением целостности:
+    в панели это выглядело как 500 на «удалить выбранные».
+
+    Отметку снимаем заранее: сам дубликат остаётся, он просто перестаёт быть
+    привязанным к исчезнувшему оригиналу.
+    """
+    ids = [post.id for post in posts]
+    if not ids:
+        return 0
+
+    db.execute(
+        update(RawPost)
+        .where(RawPost.duplicate_of_id.in_(ids))
+        .values(duplicate_of_id=None)
+    )
+    for post in posts:
+        db.delete(post)
+    return len(ids)

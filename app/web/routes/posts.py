@@ -151,8 +151,7 @@ async def posts_bulk(
             p.status = RawPostStatus.REJECTED.value
         db.commit()
     elif action == "delete":
-        for p in posts_q:
-            db.delete(p)
+        post_lifecycle.delete_posts(db, list(posts_q))
         db.commit()
     elif action == "generate":
         background_tasks.add_task(_bulk_generate_task, ids)
@@ -295,7 +294,7 @@ def reject_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(r
 def delete_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
     post = db.get(RawPost, post_id)
     if post:
-        db.delete(post)
+        post_lifecycle.delete_posts(db, [post])
         db.add(ActionLog(action="post_delete", entity_type="RawPost", entity_id=str(post_id), message="Post deleted"))
         db.commit()
     return RedirectResponse(url="/posts", status_code=302)
