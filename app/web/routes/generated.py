@@ -34,10 +34,17 @@ def generated_posts(request: Request, db: Session = Depends(get_db), _: bool = D
 
 
 @router.post("/generated/{generated_id}/save")
-def save_generated(generated_id: int, edited_text: str = Form(""), db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+def save_generated(
+    generated_id: int,
+    edited_text: str = Form(""),
+    as_blockquote: str | None = Form(None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
     generated = db.get(GeneratedPost, generated_id)
     if generated:
         generated.edited_text = edited_text
+        generated.as_blockquote = as_blockquote == "on"
         post_lifecycle.approve(generated)
         db.commit()
         return RedirectResponse(url=f"/posts/{generated.raw_post_id}", status_code=302)
@@ -49,6 +56,7 @@ async def publish_generated(
     generated_id: int,
     target_channel_id: int = Form(...),
     include_media: str | None = Form(None),
+    as_blockquote: str | None = Form(None),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -56,6 +64,10 @@ async def publish_generated(
     if not generated:
         return RedirectResponse(url="/generated", status_code=302)
     raw_post_id = generated.raw_post_id
+    # Переключатель стоит в форме публикации, а не в редакторе: иначе выбор
+    # пропадал бы у того, кто ничего не правил и сразу нажал «Опубликовать».
+    generated.as_blockquote = as_blockquote == "on"
+    db.commit()
     publisher = TelegramPublisherService()
     try:
         await publisher.publish_generated_post(

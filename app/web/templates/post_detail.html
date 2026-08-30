@@ -139,6 +139,7 @@
             <div id="editor-col-{{ g.id }}" class="col-12">
               <form method="post" action="/generated/{{ g.id }}/save" id="form-save-{{ g.id }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="as_blockquote" id="quote-saved-{{ g.id }}" value="{{ 'on' if g.as_blockquote else '' }}">
                 <textarea class="form-control mb-1"
                   name="edited_text"
                   id="textarea-{{ g.id }}"
@@ -225,6 +226,14 @@
               </label>
             </div>
             {% endif %}
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" role="switch" name="as_blockquote"
+                id="quote-{{ g.id }}" {% if g.as_blockquote %}checked{% endif %}
+                onchange="syncQuote({{ g.id }})">
+              <label class="form-check-label small text-muted" for="quote-{{ g.id }}">
+                <i class="bi bi-quote me-1"></i>Оформить цитатой
+              </label>
+            </div>
           </form>
           <form method="post" action="/generated/{{ g.id }}/reject" class="mt-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -266,6 +275,9 @@
 }
 
 /* Media grid */
+.tg-bubble-text.tg-quote {
+  border-left:3px solid #4f8ef7; padding-left:8px; margin-left:1px;
+}
 .tg-media-grid {
   display:grid; gap:2px; border-radius:8px; overflow:hidden; margin-bottom:4px;
   grid-template-columns: repeat(2, 1fr);
@@ -308,16 +320,16 @@
 const _previewState = {};
 
 function formatTgText(raw) {
-  // Escape HTML
-  let s = raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  // Restore safe Telegram HTML tags
-  const tags = ['b','i','u','s','code'];
-  tags.forEach(t => {
-    s = s.replace(new RegExp(`&lt;${t}&gt;(.*?)&lt;\\/${t}&gt;`,'gs'), `<${t}>$1</${t}>`);
-  });
-  s = s.replace(/&lt;pre&gt;(.*?)&lt;\/pre&gt;/gs, '<pre>$1</pre>');
-  s = s.replace(/&lt;a href="(.*?)"&gt;(.*?)&lt;\/a&gt;/gs, '<a href="$1" target="_blank" rel="noopener">$2</a>');
-  return s;
+  // Пост уходит без разметки, поэтому и в превью теги — обычные символы.
+  // Раньше превью показывало <b>жирным</b>, а в канале печатались сами теги.
+  return raw.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function syncQuote(id) {
+  const box = document.getElementById('quote-' + id);
+  const saved = document.getElementById('quote-saved-' + id);
+  if (saved) saved.value = box && box.checked ? 'on' : '';
+  updatePreview(id);
 }
 
 function updatePreview(id) {
@@ -333,7 +345,11 @@ function updatePreview(id) {
   // preview text + chars badge
   const pt = document.getElementById('preview-text-' + id);
   const pc = document.getElementById('preview-chars-' + id);
-  if (pt) pt.innerHTML = formatTgText(val);
+  const quoted = (document.getElementById('quote-' + id) || {}).checked;
+  if (pt) {
+    pt.innerHTML = formatTgText(val);
+    pt.classList.toggle('tg-quote', !!quoted);
+  }
   if (pc) {
     const over = len > 4096;
     pc.textContent = len + ' / 4096 символов';
