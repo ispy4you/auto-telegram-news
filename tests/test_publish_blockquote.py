@@ -134,7 +134,11 @@ def test_caption_limit_counts_the_visible_text_not_the_tags(db_session, make_pos
     assert kwargs["parse_mode"] == "HTML"
 
 
-def test_the_toggle_is_offered_on_the_post_page(logged_in, make_post):
+def test_the_toggle_is_offered_on_the_post_page(logged_in, db_session, make_post):
+    # Переключатель живёт в форме публикации, а её незачем показывать,
+    # пока в проекте нет ни одного целевого канала.
+    db_session.add(TargetChannel(title="Target", chat_id="@target", project_id=1))
+    db_session.commit()
     post = make_post("Новость дня")
 
     page = logged_in.get(f"/posts/{post.raw_post_id}").text
