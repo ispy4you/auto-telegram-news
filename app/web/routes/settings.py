@@ -1,10 +1,11 @@
 import logging
+import time
 import urllib.parse
 from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -12,7 +13,8 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
 from app.services import embedder, prompt_template, settings_registry
-from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
+from app.services.ai_gateway import AiGatewayClient
+from app.services.prompt_settings import get_display_timezone
 from app.web.auth import require_auth
 from app.web.routes.common import tpl, utcnow
 
@@ -29,8 +31,6 @@ def settings_page(
     ok: str | None = None,
     warn: str | None = None,
 ):
-    ensure_default_prompt_settings(db)
-    db.commit()
     rows = db.scalars(select(AppSetting)).all()
     cfg = {r.key: r.value for r in rows}
     env = get_settings()
@@ -50,8 +50,7 @@ def settings_page(
     return tpl(request, "settings.html", db, {
         "cfg": cfg,
         "env": env,
-        "default_system_prompt": get_ai_system_prompt(db),
-        "default_user_prompt": get_ai_user_prompt_template(db),
+        "default_prompt": settings_registry.default("ai_prompt"),
         "media_size_mb": media_stats["size_mb"],
         "media_stats": media_stats,
         "ok": ok,
@@ -98,9 +97,9 @@ async def settings_save(
 
     settings_registry.store(db, values)
 
-    # Шаблон промпта больше не может уронить генерацию, но опечатка в нём
+    # Промпт больше не может уронить генерацию, но опечатка в плейсхолдере
     # молча оставит модель без данных — поэтому говорим о ней сразу.
-    warnings = prompt_template.problems(values["ai_prompt_template"]) if "ai_prompt_template" in values else []
+    warnings = prompt_template.problems(values["ai_prompt"]) if "ai_prompt" in values else []
 
     if "fetch_interval_seconds" in values:
         sched = getattr(request.app.state, "scheduler", None)
@@ -116,6 +115,73 @@ async def settings_save(
             status_code=302,
         )
     return RedirectResponse(url="/settings", status_code=302)
+
+
+def _preview_post(db: Session, offset: int) -> RawPost | None:
+    """Свежая новость с текстом: offset сдвигает к следующей по свежести."""
+    return db.scalars(
+        select(RawPost)
+        .where(RawPost.original_text != "")
+        .order_by(RawPost.fetched_at.desc(), RawPost.id.desc())
+        .offset(offset)
+        .limit(1)
+    ).first()
+
+
+@router.post("/settings/prompt-preview")
+async def settings_prompt_preview(
+    prompt: str = Form(""),
+    offset: int = Form(0),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    """Прогоняет текст прямо из поля на свежей новости.
+
+    Ничего не сохраняет: ни настройку, ни готовый пост. Иначе проверить правку
+    можно было бы только испортив живую генерацию.
+    """
+    offset = max(0, min(offset, 20))
+    post = _preview_post(db, offset)
+    if post is None and offset:
+        offset, post = 0, _preview_post(db, 0)
+    if post is None:
+        return JSONResponse({
+            "ok": False,
+            "error": "Проверить не на чем: пока не собрано ни одной новости с текстом.",
+        })
+
+    started = time.monotonic()
+    result = await AiGatewayClient().generate_news_post(post, db, rules=prompt)
+    elapsed = round(time.monotonic() - started, 1)
+
+    outcome = result.reason if result.failed else ("подходит" if result.suitable else "не подходит")
+    db.add(ActionLog(
+        action="prompt_preview",
+        entity_type="RawPost",
+        entity_id=str(post.id),
+        message=f"Проверка промпта на новости #{post.id}: {outcome}",
+    ))
+    db.commit()
+
+    published = post.published_at_source
+    return JSONResponse({
+        "ok": True,
+        "offset": offset,
+        "post": {
+            "id": post.id,
+            "source": post.source.title if post.source else "источник неизвестен",
+            "published_at": published.strftime("%d.%m.%Y %H:%M") if published else "",
+            "excerpt": (post.original_text or "")[:400],
+            "truncated": len(post.original_text or "") > 400,
+        },
+        "failed": result.failed,
+        "suitable": result.suitable,
+        "text": result.text,
+        "reason": result.reason,
+        "model": result.model_name or "не задана",
+        "finish_reason": result.finish_reason,
+        "elapsed": elapsed,
+    })
 
 
 @router.post("/settings/reset")

@@ -34,6 +34,15 @@ def render(template: str, values: dict[str, str]) -> str:
     return _TOKEN.sub(substitute, template)
 
 
+def used(template: str) -> set[str]:
+    """Какие известные плейсхолдеры пользователь расставил сам.
+
+    Остальные данные новости дописываются к промпту автоматически, см.
+    ai_prompt.build_user_message.
+    """
+    return {m.group(1) for m in _TOKEN.finditer(template) if m.group(1) in PLACEHOLDERS}
+
+
 def unknown_placeholders(template: str) -> list[str]:
     """Имена вида `{что_то}`, которые подставить нечем.
 
@@ -50,16 +59,11 @@ def unknown_placeholders(template: str) -> list[str]:
 
 
 def problems(template: str) -> list[str]:
-    """Человеческие предупреждения по шаблону. Пустой список — вопросов нет."""
+    """Человеческие предупреждения по промпту. Пустой список — вопросов нет."""
     issues: list[str] = []
     if not template.strip():
-        issues.append("Шаблон промпта пустой — модель не получит ни текста новости, ни задания.")
+        issues.append("Правила для AI пустые — модель не получит задания и напишет что угодно.")
         return issues
-    if "{original_text}" not in template:
-        issues.append(
-            "В шаблоне нет {original_text} — модель не увидит текст новости "
-            "и будет придумывать пост с нуля."
-        )
     unknown = unknown_placeholders(template)
     if unknown:
         names = ", ".join("{%s}" % name for name in unknown)

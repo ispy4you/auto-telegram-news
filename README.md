@@ -124,8 +124,8 @@ flowchart TD
 ### AI generation
 - Integrates with **Timeweb AI Gateway** (OpenAI-compatible endpoint) — pluggable to any
   OpenAI-compatible API.
-- System prompt and user template are stored in the database and editable directly from the admin
-  UI.
+- The AI rules are stored in the database and editable directly from the admin UI, with a
+  "try it on the latest news item" button next to them.
 - Configurable temperature, token limit, timeout.
 - Automatic post scoring: `SUITABLE` / `REJECTED`.
 - Graceful handling of truncated JSON responses from the model.
