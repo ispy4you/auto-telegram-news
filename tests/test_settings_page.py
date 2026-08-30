@@ -32,3 +32,31 @@ def test_login_card_asks_for_api_keys_when_they_are_missing(logged_in, monkeypat
 
     assert "my.telegram.org" in page
     assert "tg-wizard" not in page
+
+
+def test_prompt_with_json_example_saves_without_a_warning(logged_in, csrf, db_session):
+    """Фигурные скобки в промпте — обычный текст, а не повод ругаться."""
+    template = 'Новость: {original_text}\nВерни JSON: {"suitable": true, "text": ""}'
+
+    response = logged_in.post("/settings", data={
+        "csrf_token": csrf(logged_in, "/settings"),
+        "ai_prompt_template": template,
+    })
+
+    assert response.status_code == 302
+    assert "warn=" not in response.headers["location"]
+    from app.services import settings_registry
+    assert settings_registry.get("ai_prompt_template", db_session) == template
+
+
+def test_typo_in_a_placeholder_is_reported_but_still_saved(logged_in, csrf):
+    response = logged_in.post("/settings", data={
+        "csrf_token": csrf(logged_in, "/settings"),
+        "ai_prompt_template": "Напиши пост про {text}",
+    })
+
+    assert response.status_code == 302
+    assert "warn=" in response.headers["location"]
+
+    page = logged_in.get("/settings?warn=" + "Непонятные+плейсхолдеры").text
+    assert "Непонятные плейсхолдеры" in page

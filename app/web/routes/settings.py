@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
-from app.services import embedder, settings_registry
+from app.services import embedder, prompt_template, settings_registry
 from app.services.prompt_settings import ensure_default_prompt_settings, get_ai_system_prompt, get_ai_user_prompt_template, get_display_timezone
 from app.web.auth import require_auth
 from app.web.routes.common import tpl, utcnow
@@ -22,7 +22,13 @@ router = APIRouter()
 
 
 @router.get("/settings")
-def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None):
+def settings_page(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+    ok: str | None = None,
+    warn: str | None = None,
+):
     ensure_default_prompt_settings(db)
     db.commit()
     rows = db.scalars(select(AppSetting)).all()
@@ -49,6 +55,7 @@ def settings_page(request: Request, db: Session = Depends(get_db), _: bool = Dep
         "media_size_mb": media_stats["size_mb"],
         "media_stats": media_stats,
         "ok": ok,
+        "warn": warn,
         "current_tz": get_display_timezone(db),
         "embedder_model": embedder.model_name(),
         "bot_token_set": bool(cfg.get("telegram_bot_token") or env.telegram_bot_token),
@@ -91,6 +98,10 @@ async def settings_save(
 
     settings_registry.store(db, values)
 
+    # Шаблон промпта больше не может уронить генерацию, но опечатка в нём
+    # молча оставит модель без данных — поэтому говорим о ней сразу.
+    warnings = prompt_template.problems(values["ai_prompt_template"]) if "ai_prompt_template" in values else []
+
     if "fetch_interval_seconds" in values:
         sched = getattr(request.app.state, "scheduler", None)
         if sched:
@@ -99,6 +110,11 @@ async def settings_save(
             except Exception as exc:
                 logger.warning("Could not update scheduler interval: %s", exc)
 
+    if warnings:
+        return RedirectResponse(
+            url="/settings?warn=" + urllib.parse.quote(" ".join(warnings)[:600]),
+            status_code=302,
+        )
     return RedirectResponse(url="/settings", status_code=302)
 
 

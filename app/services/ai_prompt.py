@@ -26,15 +26,15 @@ DEFAULT_AI_USER_PROMPT_TEMPLATE = """Источник: {source_title}
 - если текст рекламный или мусорный, suitable=false.
 
 Верни строго JSON:
-{{
+{
   "suitable": true,
   "text": "готовый текст поста",
   "reason": ""
-}}
+}
 
 Если пост не подходит:
-{{
+{
   "suitable": false,
   "text": "",
   "reason": "почему не подходит"
-}}"""
+}"""

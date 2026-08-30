@@ -5,6 +5,16 @@
   <a href="/posts" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Назад к постам</a>
 </div>
 
+{% if err %}
+<div class="alert alert-danger alert-dismissible">
+  <i class="bi bi-exclamation-octagon me-2"></i>
+  <strong>Не удалось сгенерировать пост.</strong>
+  <div class="small mt-1" style="word-break:break-word">{{ err }}</div>
+  <div class="small mt-1 text-muted">Пост не тронут: устраните причину и нажмите «Сгенерировать» ещё раз.</div>
+  <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+</div>
+{% endif %}
+
 <div class="row g-3">
 
   {# Левая колонка — оригинал #}
