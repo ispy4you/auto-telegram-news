@@ -1,4 +1,5 @@
 import json
+import logging
 from dataclasses import dataclass
 
 import httpx
@@ -8,6 +9,8 @@ from app.models import RawPost
 from app.services import prompt_template, settings_registry
 from app.services.prompt_settings import get_ai_system_prompt, get_ai_user_prompt_template
 
+
+logger = logging.getLogger(__name__)
 
 PROMPT_VERSION = "v1"
 
@@ -79,11 +82,48 @@ class AiGatewayClient:
         except Exception as exc:
             return AiResult(False, "", f"AI gateway недоступен: {type(exc).__name__}: {exc}", model, failed=True)
 
-        content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        choice = (data.get("choices") or [{}])[0] or {}
+        message = choice.get("message") or {}
+        content = message.get("content") or ""
+        finish = choice.get("finish_reason") or "не указан"
+
+        if not content.strip():
+            # Пустой ответ раньше доходил до панели как «AI вернул не-JSON ответ:»
+            # с пустотой после двоеточия — устранять было нечего.
+            logger.warning(
+                "Пустой ответ шлюза: model=%s finish_reason=%s usage=%s поля ответа=%s",
+                model, finish, data.get("usage"), sorted(message),
+            )
+            return AiResult(False, "", self._describe_empty(finish, message, max_tokens), model, failed=True)
+
         parsed = self._parse_json(content)
         if parsed is None:
-            return AiResult(False, "", f"AI вернул не-JSON ответ: {content[:300]}", model, failed=True)
+            logger.warning("Неразбираемый ответ шлюза: model=%s finish_reason=%s", model, finish)
+            return AiResult(
+                False, "",
+                f"AI вернул не-JSON ответ (finish_reason={finish}): {content[:300]}",
+                model, failed=True,
+            )
         return AiResult(bool(parsed.get("suitable")), parsed.get("text", ""), parsed.get("reason", ""), model)
+
+    @staticmethod
+    def _describe_empty(finish: str, message: dict, max_tokens: int) -> str:
+        """Почему ответ пустой — словами, которые говорят, что делать."""
+        thinking = (message.get("reasoning_content") or message.get("reasoning") or "").strip()
+
+        if finish == "length" or thinking:
+            spent = " Модель потратила лимит на рассуждение и не дошла до ответа." if thinking else ""
+            return (
+                f"Модель упёрлась в лимит ответа: ai_max_tokens = {max_tokens}.{spent} "
+                f"Увеличьте лимит в настройках или возьмите модель попроще."
+            )
+        if finish == "content_filter":
+            return "Модель отказалась отвечать: сработал её собственный фильтр содержимого."
+        return (
+            f"Модель вернула пустой ответ (finish_reason={finish}). "
+            f"Обычно так отвечает модель, не поддерживающая ответ строго в JSON — "
+            f"проверьте, та ли модель указана в настройках."
+        )
 
     @staticmethod
     def _parse_json(content: str) -> dict | None:

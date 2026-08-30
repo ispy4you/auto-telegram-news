@@ -34,7 +34,9 @@ class Settings(BaseSettings):
     timeweb_ai_gateway_base_url: str | None = None
     timeweb_ai_gateway_model: str | None = None
     ai_temperature: float = 0.4
-    ai_max_tokens: int = 2400
+    # Рассуждающие модели тратят часть лимита на размышление и при тесном
+    # потолке возвращают пустой ответ, не дойдя до текста поста.
+    ai_max_tokens: int = 4000
     ai_timeout_seconds: int = 60
 
     fetch_interval_seconds: int = 120
