@@ -125,7 +125,8 @@ flowchart TD
 - Integrates with **Timeweb AI Gateway** (OpenAI-compatible endpoint) — pluggable to any
   OpenAI-compatible API.
 - The AI rules are stored in the database and editable directly from the admin UI, with a
-  "try it on the latest news item" button next to them.
+  "try it on the latest news item" button next to them and a read-only reference showing what else
+  goes to the model.
 - Configurable temperature, token limit, timeout.
 - Automatic post scoring: `SUITABLE` / `REJECTED`.
 - Graceful handling of truncated JSON responses from the model.

@@ -274,20 +274,22 @@
         {{ db_badge('ai_prompt', 'Используется текст по умолчанию') }}
 
         <details class="mt-3">
-          <summary class="small text-muted" style="cursor:pointer">Что подставляется автоматически</summary>
+          <summary class="small text-muted" style="cursor:pointer">Что уходит в модель помимо ваших правил</summary>
           <div class="small text-muted mt-2">
-            К каждому запросу приклеиваются сами — писать их в правилах не нужно:
-            <ul class="mb-2 mt-1">
-              <li>текст исходной новости</li>
-              <li>название источника</li>
-              <li>дата публикации</li>
-              <li>есть ли у новости медиа</li>
-            </ul>
-            Если хотите поставить что-то в определённое место — напишите
-            <code>{original_text}</code>, <code>{source_title}</code>,
-            <code>{published_at_source}</code> или <code>{has_media}</code>:
-            данные встанут туда и второй раз не приедут.<br>
-            Формат ответа приложение просит у модели само, в правилах его описывать не надо.
+            Приклеивается к каждому запросу само. Здесь это только для справки: править нечего и не нужно.
+
+            <div class="fw-semibold mt-2 mb-1">Данные новости</div>
+            <pre class="border rounded bg-light p-3 mb-1 small" style="white-space:pre-wrap">{{ auto_appendix }}</pre>
+            <div class="mb-3">
+              Если хотите поставить эти данные в определённое место — напишите в правилах
+              <code>{original_text}</code>, <code>{source_title}</code>,
+              <code>{published_at_source}</code> или <code>{has_media}</code>:
+              тогда они встанут туда и второй раз не приедут.
+            </div>
+
+            <div class="fw-semibold mb-1">Формат ответа</div>
+            <pre class="border rounded bg-light p-3 mb-1 small" style="white-space:pre-wrap">{{ response_contract }}</pre>
+            <div>Это договор приложения с моделью, а не настройка стиля: по нему разбирается ответ.</div>
           </div>
         </details>
 
