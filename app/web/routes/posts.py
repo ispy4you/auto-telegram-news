@@ -1,5 +1,6 @@
 import urllib.parse
 from dataclasses import replace
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
-from app.services import post_lifecycle
+from app.services import media_restore, post_lifecycle
 from app.services.ai_gateway import AiGatewayClient, AiResult, GenerationFailed
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
@@ -181,7 +182,25 @@ def post_detail(post_id: int, request: Request, db: Session = Depends(get_db), _
     if pid is not None:
         tgt_q = tgt_q.where(TargetChannel.project_id == pid)
     targets = db.scalars(tgt_q).all()
-    return tpl(request, "post_detail.html", db, {"post": post, "targets": targets, "err": err})
+    # Файлы могли не пережить перезапуск: отмечаем пропавшие, чтобы страница
+    # показала заглушку вместо битой картинки и сама попросила их перекачать.
+    missing_media = {item.id for item in media_restore.missing_media(post)}
+    return tpl(request, "post_detail.html", db, {
+        "post": post, "targets": targets, "err": err, "missing_media": missing_media,
+    })
+
+
+@router.post("/posts/{post_id}/restore-media")
+async def restore_post_media(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    """Перекачивает пропавшее медиа. Страница поста дёргает это сама при открытии."""
+    post = db.scalar(
+        select(RawPost)
+        .options(joinedload(RawPost.source), selectinload(RawPost.media_items))
+        .where(RawPost.id == post_id)
+    )
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return await media_restore.restore(db, post)
 
 
 async def _do_generate(post_id: int, db: Session) -> None:

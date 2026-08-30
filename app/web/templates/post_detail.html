@@ -43,8 +43,19 @@
         <div style="font-size:.92rem;line-height:1.7;white-space:pre-wrap;word-break:break-word;max-width:60ch;color:#1a1d23">{{ post.original_text or '— нет текста —' }}</div>
 
         {% if post.media_items %}
+        {% if missing_media %}
+        <div id="media-restore" class="alert alert-secondary py-2 px-3 mt-3 mb-0 small"
+             data-url="/posts/{{ post.id }}/restore-media"
+             data-csrf="{{ csrf_token }}"
+             data-post="{{ post.id }}">
+          <span class="spinner-border spinner-border-sm me-2"></span>Файлов нет на диске — забираю их из источника…
+        </div>
+        {% endif %}
         <div class="mt-3 d-flex flex-wrap gap-2">
           {% for m in post.media_items %}
+          {% if m.id in missing_media %}
+            <div class="media-gone rounded"><i class="bi bi-image"></i></div>
+          {% else %}
           {% set media_url = '/media/' + m.file_path | replace('data/media/', '') %}
           {% if m.media_type == 'photo' %}
             <img src="{{ media_url }}" class="rounded" style="max-height:180px;max-width:100%;object-fit:cover" alt="photo">
@@ -52,6 +63,7 @@
             <video src="{{ media_url }}" controls style="max-height:200px;max-width:100%"></video>
           {% else %}
             <a href="{{ media_url }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-paperclip me-1"></i>Файл</a>
+          {% endif %}
           {% endif %}
           {% endfor %}
         </div>
@@ -169,7 +181,7 @@
                     <div class="tg-preview-avatar"><i class="bi bi-megaphone-fill"></i></div>
                     <div>
                       <div class="tg-preview-chname">{{ post.source.title if post.source else 'Канал' }}</div>
-                      <div class="tg-preview-sub">{{ post.media_count }} медиа · предпросмотр</div>
+                      <div class="tg-preview-sub" id="preview-sub-{{ g.id }}" data-count="{{ post.media_count }}">{{ post.media_count }} медиа · предпросмотр</div>
                     </div>
                   </div>
                   <div class="tg-preview-feed">
@@ -178,7 +190,9 @@
                     <div class="tg-media-grid" id="preview-media-{{ g.id }}">
                       {% for m in post.media_items[:4] %}
                       {% set media_url = '/media/' + m.file_path | replace('data/media/', '') %}
-                      {% if m.media_type == 'photo' %}
+                      {% if m.id in missing_media %}
+                        <div class="tg-media-cell tg-media-doc"><i class="bi bi-image"></i></div>
+                      {% elif m.media_type == 'photo' %}
                         <div class="tg-media-cell"><img src="{{ media_url }}" alt=""></div>
                       {% elif m.media_type == 'video' %}
                         <div class="tg-media-cell tg-media-video">
@@ -220,7 +234,8 @@
             </div>
             {% if post.has_media %}
             <div class="form-check form-switch mt-2">
-              <input class="form-check-input" type="checkbox" role="switch" name="include_media" id="inc-media-{{ g.id }}" checked>
+              <input class="form-check-input" type="checkbox" role="switch" name="include_media" id="inc-media-{{ g.id }}" checked
+                onchange="updatePreview({{ g.id }})">
               <label class="form-check-label small text-muted" for="inc-media-{{ g.id }}">
                 <i class="bi bi-paperclip me-1"></i>Прикрепить медиа ({{ post.media_count }} шт.)
               </label>
@@ -275,6 +290,10 @@
 }
 
 /* Media grid */
+.media-gone {
+  width:120px; height:120px; background:#f1f3f5; border:1px dashed #ced4da;
+  display:flex; align-items:center; justify-content:center; color:#adb5bd; font-size:1.6rem;
+}
 .tg-bubble-text.tg-quote {
   border-left:3px solid #4f8ef7; padding-left:8px; margin-left:1px;
 }
@@ -350,6 +369,18 @@ function updatePreview(id) {
     pt.innerHTML = formatTgText(val);
     pt.classList.toggle('tg-quote', !!quoted);
   }
+
+  // Превью обязано слушаться переключателя медиа: иначе оно обещает картинки,
+  // которых в канале не будет.
+  const incBox = document.getElementById('inc-media-' + id);
+  const withMedia = !incBox || incBox.checked;
+  const grid = document.getElementById('preview-media-' + id);
+  if (grid) grid.style.display = withMedia ? '' : 'none';
+  const sub = document.getElementById('preview-sub-' + id);
+  if (sub) {
+    const total = parseInt(sub.dataset.count || '0', 10);
+    sub.textContent = (withMedia ? total : 0) + ' медиа · предпросмотр';
+  }
   if (pc) {
     const over = len > 4096;
     pc.textContent = len + ' / 4096 символов';
@@ -390,6 +421,42 @@ document.addEventListener('keydown', function(e) {
       togglePreview(parseInt(m[1]));
     }
   }
+});
+
+// Пропавшие после перезапуска файлы забираем из источника сами — отдельным
+// запросом, чтобы открытие поста не ждало скачивания видео.
+document.addEventListener('DOMContentLoaded', function() {
+  const box = document.getElementById('media-restore');
+  if (!box) return;
+
+  const once = 'media-restored-' + box.dataset.post;
+  function say(text, kind) {
+    box.className = 'alert alert-' + kind + ' py-2 px-3 mt-3 mb-0 small';
+    box.textContent = text;
+  }
+
+  fetch(box.dataset.url, {
+    method: 'POST',
+    body: new URLSearchParams({csrf_token: box.dataset.csrf}),
+  })
+    .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+    .then(function (d) {
+      if (d.restored > 0) {
+        // Перезагрузка нужна, чтобы отрисовались сами картинки. Метка защищает
+        // от кольца перезагрузок, если файл всё-таки не окажется на месте.
+        if (!sessionStorage.getItem(once)) {
+          try { sessionStorage.setItem(once, '1'); } catch (_) {}
+          location.reload();
+          return;
+        }
+      }
+      if (d.status === 'busy' || d.status === 'cooldown') {
+        say('Файлы сейчас не восстановить. Попробуем ещё раз при публикации.', 'secondary');
+      } else {
+        say('Файлы забрать не удалось: сообщение в источнике удалено или файл больше лимита. Пост уйдёт одним текстом.', 'warning');
+      }
+    })
+    .catch(function () { say('Не удалось запросить восстановление медиа.', 'warning'); });
 });
 
 // Init char counters on load
