@@ -30,11 +30,11 @@ def original_and_duplicate(db_session, source):
 
 
 def _delete(client, csrf, ids):
-    return client.post("/posts/bulk", data=[
-        ("csrf_token", csrf(client, "/posts")),
-        ("bulk_action", "delete"),
-        *[("post_ids", str(i)) for i in ids],
-    ])
+    return client.post("/posts/bulk", data={
+        "csrf_token": csrf(client, "/posts"),
+        "bulk_action": "delete",
+        "post_ids": [str(i) for i in ids],
+    })
 
 
 def test_deleting_an_original_no_longer_fails(logged_in, csrf, db_session, original_and_duplicate):
