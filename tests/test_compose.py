@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, patch
 from sqlalchemy import select
 
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel
+from app.services.deduplication import DeduplicationService
 from app.services import manual_post
 from app.services.ai_gateway import AiResult
 
@@ -123,3 +124,29 @@ def test_the_hidden_source_is_not_counted_as_a_channel(logged_in, csrf):
         _compose(logged_in, csrf)
 
     assert '>0<span class="text-muted fs-5">/0</span>' in logged_in.get("/").text
+
+
+def test_a_whole_article_never_reaches_the_model(logged_in, csrf, db_session):
+    """В поле мог улететь целый файл — платить за такой запрос незачем."""
+    generate = _answer()
+    with patch("app.services.ai_gateway.AiGatewayClient.generate", generate):
+        page = _compose(logged_in, csrf, text="а" * 20001).text
+
+    generate.assert_not_awaited()
+    assert "Слишком длинный текст" in page
+    assert db_session.scalars(select(RawPost)).all() == []
+
+
+def test_the_same_news_from_a_channel_is_recognised_as_a_duplicate(logged_in, csrf, db_session, source):
+    """Ручной пост виден дедупликации как образец, иначе новость уйдёт дважды."""
+    with patch("app.services.ai_gateway.AiGatewayClient.generate", _answer()):
+        _compose(logged_in, csrf)
+    manual = db_session.scalar(select(RawPost))
+
+    arrived = RawPost(source_id=source.id, telegram_message_id=777, text_hash="", original_text=TEXT)
+    db_session.add(arrived)
+    db_session.flush()
+    DeduplicationService().deduplicate_post(db_session, arrived)
+
+    assert arrived.status == RawPostStatus.DUPLICATE.value
+    assert arrived.duplicate_of_id == manual.id

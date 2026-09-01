@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel
+from app.services.deduplication import DeduplicationService
 
 #: Тип скрытого источника. По нему ручной источник отличается от настоящих
 #: каналов: его не читают из Telegram и не показывают в списке источников.
@@ -70,6 +71,7 @@ def create(
     """Заводит ручной пост вместе с его черновиком и возвращает исходник."""
     source = get_or_create_source(db, project_id)
     published_at = _utcnow()
+    normalized = DeduplicationService.normalize_text(original_text)
     post = RawPost(
         source_id=source.id,
         # У ручного поста нет сообщения в Telegram, но колонка обязательная и
@@ -77,8 +79,11 @@ def create(
         # не пересекаются и сразу видно, что номер выдуман.
         telegram_message_id=_next_message_id(db, source.id),
         original_text=original_text,
-        normalized_text="",
-        text_hash="",
+        # Нормализованный текст и хеш заполняются сразу, хотя сам ручной пост
+        # дедупликацию не проходит. Иначе он невидим для неё как образец: та же
+        # новость, пришедшая через час из канала, ушла бы в эфир второй раз.
+        normalized_text=normalized,
+        text_hash=DeduplicationService.text_hash(normalized),
         published_at_source=published_at,
         has_media=False,
         media_count=0,

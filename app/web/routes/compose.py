@@ -19,7 +19,11 @@ from app.web.routes.common import current_project_id, tpl
 
 router = APIRouter()
 
-MIN_TEXT_LEN = 20
+#: Ниже этого текст на новость не тянет — незачем тратить на него запрос.
+MIN_TEXT_LEN = 10
+#: Верхняя граница на случай, когда в поле улетела целая статья или файл
+#: целиком: длинный запрос стоит денег и всё равно упрётся в контекст модели.
+MAX_TEXT_LEN = 20000
 
 
 def _page(request: Request, db: Session, text: str = "", error: str | None = None, refusal: str | None = None):
@@ -44,6 +48,11 @@ async def compose_generate(
     text = (source_text or "").strip()
     if len(text) < MIN_TEXT_LEN:
         return _page(request, db, text, error=f"Слишком короткий текст: нужно хотя бы {MIN_TEXT_LEN} символов.")
+    if len(text) > MAX_TEXT_LEN:
+        return _page(request, db, text, error=(
+            f"Слишком длинный текст: {len(text)} символов при пределе {MAX_TEXT_LEN}. "
+            f"Оставьте саму новость, без всего остального."
+        ))
 
     result = await AiGatewayClient().generate(manual_post.prompt_values(text), db)
 
