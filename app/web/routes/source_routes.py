@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ActionLog, SourceChannel, SourceTargetRoute, TargetChannel
+from app.services import manual_post
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, tpl
 
@@ -16,7 +17,11 @@ router = APIRouter()
 @router.get("/routes")
 def routes_page(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), ok: str | None = None):
     pid = current_project_id(request, db)
-    src_q = select(SourceChannel).order_by(SourceChannel.title)
+    # Маршруты «источник → канал» ручному источнику не нужны: такой пост
+    # публикуют руками, автоподбор целей до него не доходит.
+    src_q = (select(SourceChannel)
+        .where(SourceChannel.source_type != manual_post.SOURCE_TYPE)
+        .order_by(SourceChannel.title))
     tgt_q = select(TargetChannel).order_by(TargetChannel.title)
     if pid is not None:
         src_q = src_q.where(SourceChannel.project_id == pid)
