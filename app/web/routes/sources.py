@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ActionLog, RawPost, RawPostStatus, SourceChannel
+from app.services import manual_post
 from app.services.telegram_reader import TelegramReaderService
 from app.services.telegram_reader import TelegramReaderService
 from app.web.auth import require_auth
@@ -18,7 +19,11 @@ router = APIRouter()
 @router.get("/sources")
 def sources(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth), error: str | None = None, ok: str | None = None):
     pid = current_project_id(request, db)
-    q = select(SourceChannel).order_by(SourceChannel.created_at.desc())
+    # Источник «Ручной ввод» — служебный: читать из него нечего, проверять и
+    # удалять тоже незачем.
+    q = (select(SourceChannel)
+        .where(SourceChannel.source_type != manual_post.SOURCE_TYPE)
+        .order_by(SourceChannel.created_at.desc()))
     if pid is not None:
         q = q.where(SourceChannel.project_id == pid)
     items = db.scalars(q).all()

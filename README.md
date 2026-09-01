@@ -137,6 +137,8 @@ flowchart TD
 - Manual editing of AI-generated text before publishing.
 - Publish the original text without AI processing.
 - Re-generate already-processed posts.
+- **Compose tab**: paste your own text and get a post written by the same prompt — useful for
+  news that arrived outside the tracked channels.
 - **Telegram-style preview** right on the post page: message bubble, media grid, character
   counter, `Ctrl+P` hotkey — updates live as you edit.
 

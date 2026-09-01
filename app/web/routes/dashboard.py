@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
+from app.services import manual_post
 from app.services.news_pipeline import NewsPipelineService
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, tpl
@@ -28,7 +29,10 @@ async def dashboard(request: Request, db: Session = Depends(get_db), _: bool = D
                   .join(SourceChannel, RawPost.source_id == SourceChannel.id)
                   .where(SourceChannel.project_id == pid)) if pid is not None else q
 
-    src_base = select(func.count()).select_from(SourceChannel)
+    # Скрытый источник ручных постов в счётчике каналов не участвует: админ
+    # его не заводил и в списке источников не видит.
+    src_base = (select(func.count()).select_from(SourceChannel)
+        .where(SourceChannel.source_type != manual_post.SOURCE_TYPE))
     if pid is not None:
         src_base = src_base.where(SourceChannel.project_id == pid)
 

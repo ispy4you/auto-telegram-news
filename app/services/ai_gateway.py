@@ -37,9 +37,26 @@ class AiResult:
 
 
 class AiGatewayClient:
+    @staticmethod
+    def _post_values(raw_post: RawPost) -> dict[str, str]:
+        return {
+            "source_title": raw_post.source.title if raw_post.source else "Unknown",
+            "published_at_source": raw_post.published_at_source or "неизвестно",
+            "original_text": raw_post.original_text or "",
+            "has_media": "да" if raw_post.has_media else "нет",
+        }
+
     def _build_messages(
         self,
         raw_post: RawPost,
+        db: Session | None = None,
+        rules: str | None = None,
+    ) -> list[dict]:
+        return self._messages_from_values(self._post_values(raw_post), db, rules)
+
+    def _messages_from_values(
+        self,
+        values: dict[str, str],
         db: Session | None = None,
         rules: str | None = None,
     ) -> list[dict]:
@@ -47,12 +64,7 @@ class AiGatewayClient:
         прямо из поля, не сохраняя его."""
         user_prompt = ai_prompt.build_user_message(
             get_ai_prompt(db) if rules is None else rules,
-            {
-                "source_title": raw_post.source.title if raw_post.source else "Unknown",
-                "published_at_source": raw_post.published_at_source or "неизвестно",
-                "original_text": raw_post.original_text or "",
-                "has_media": "да" if raw_post.has_media else "нет",
-            },
+            values,
         )
         return [
             {"role": "system", "content": ai_prompt.RESPONSE_CONTRACT},
@@ -65,6 +77,25 @@ class AiGatewayClient:
         db: Session | None = None,
         rules: str | None = None,
     ) -> AiResult:
+        """Новость из канала: данные для промпта берутся из самого поста."""
+        try:
+            values = self._post_values(raw_post)
+        except Exception as exc:
+            model = settings_registry.get("timeweb_ai_gateway_model", db)
+            return AiResult(False, "", f"Не удалось собрать промпт: {type(exc).__name__}: {exc}", model, failed=True)
+        return await self.generate(values, db, rules)
+
+    async def generate(
+        self,
+        values: dict[str, str],
+        db: Session | None = None,
+        rules: str | None = None,
+    ) -> AiResult:
+        """Генерация по готовым данным новости — источник их не важен.
+
+        Ручной ввод из панели приходит сюда напрямую: поста в базе ещё нет, а
+        промпт и разбор ответа нужны ровно те же, что и для новости из канала.
+        """
         base_url = settings_registry.get("timeweb_ai_gateway_base_url", db)
         api_key = settings_registry.get("timeweb_ai_gateway_api_key", db)
         model = settings_registry.get("timeweb_ai_gateway_model", db)
@@ -76,7 +107,7 @@ class AiGatewayClient:
         timeout_seconds = settings_registry.get("ai_timeout_seconds", db)
 
         try:
-            messages = self._build_messages(raw_post, db, rules)
+            messages = self._messages_from_values(values, db, rules)
         except Exception as exc:
             return AiResult(False, "", f"Не удалось собрать промпт: {type(exc).__name__}: {exc}", model, failed=True)
 

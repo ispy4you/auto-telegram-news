@@ -90,6 +90,9 @@
       <i class="bi bi-inbox"></i> Посты
       {% if nav_new %}<span class="badge bg-primary rounded-pill">{{ nav_new }}</span>{% endif %}
     </a>
+    <a class="nav-link {% if request.url.path.startswith('/compose') %}active{% endif %}" href="/compose">
+      <i class="bi bi-magic"></i> Генерация
+    </a>
 
     <div class="section-label">Каналы</div>
     <a class="nav-link {% if request.url.path.startswith('/sources') %}active{% endif %}" href="/sources">

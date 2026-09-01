@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="fw-semibold mb-0">Генерация поста</h4>
+</div>
+
+{% if error %}
+<div class="alert alert-danger">
+  <i class="bi bi-exclamation-octagon me-2"></i>{{ error }}
+</div>
+{% endif %}
+
+{% if refusal %}
+<div class="alert alert-warning">
+  <i class="bi bi-slash-circle me-2"></i><strong>Модель отказалась делать пост.</strong>
+  <div class="small mt-1">{{ refusal }}</div>
+  <div class="small mt-2 text-muted">
+    Текст остался в поле: поправьте его и попробуйте снова — или смягчите правила в
+    <a href="/settings">настройках</a>.
+  </div>
+</div>
+{% endif %}
+
+<div class="row g-4">
+  <div class="col-lg-9">
+    <div class="card">
+      <div class="card-header bg-white fw-semibold">
+        Исходный текст
+        <span class="text-muted fw-normal small">— вставьте новость, которая пришла мимо источников</span>
+      </div>
+      <div class="card-body">
+        <form method="post" action="/compose" id="compose-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <textarea class="form-control" name="source_text" id="compose-text" rows="14"
+            style="font-size:.95rem" autofocus
+            placeholder="Вставьте текст новости целиком — так же, как он пришёл.">{{ text }}</textarea>
+          <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="form-text m-0">
+              Пост соберётся по вашим правилам из <a href="/settings">настроек</a> — тем же промптом,
+              что и новости из каналов.
+            </div>
+            <button class="btn btn-primary" type="submit" id="compose-submit">
+              <i class="bi bi-magic me-1"></i>Сгенерировать
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-3">
+    <div class="card">
+      <div class="card-header bg-white fw-semibold">Что дальше</div>
+      <div class="card-body small text-muted">
+        Готовый пост откроется на своей странице — с редактором, предпросмотром Telegram,
+        повторной генерацией и публикацией в каналы.
+        <div class="mt-2">
+          В списке постов он появится с источником «{{ manual_source_title }}».
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Генерация идёт несколько секунд: кнопка должна показать, что работа пошла,
+// и не дать отправить форму второй раз.
+(() => {
+  const form = document.getElementById('compose-form');
+  const btn = document.getElementById('compose-submit');
+  if (!form || !btn) return;
+  form.addEventListener('submit', () => {
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Генерирую…';
+  });
+})();
+</script>
+
+{% endblock %}
