@@ -71,8 +71,28 @@ def test_the_uploaded_file_is_not_named_by_the_browser(logged_in, csrf, db_sessi
 
 
 def test_an_empty_field_is_not_an_upload(logged_in, csrf, db_session, post, media_root):
-    """Браузер присылает пустую часть, когда файл не выбран."""
-    response = _upload(logged_in, csrf, post.id, [("files", ("", b"", "application/octet-stream"))])
+    """Браузер с пустым полем присылает часть с filename="" — это не файл.
+
+    Тело собрано руками: клиент тестов в таком случае отправляет обычное поле
+    формы, и до маршрута дело не доходит — проверять надо ровно то, что шлёт
+    браузер.
+    """
+    token = csrf(logged_in, f"/posts/{post.id}")
+    boundary = "----boundary"
+    body = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="csrf_token"\r\n\r\n{token}\r\n'
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="files"; filename=""\r\n'
+        f"Content-Type: application/octet-stream\r\n\r\n\r\n"
+        f"--{boundary}--\r\n"
+    ).encode()
+
+    response = logged_in.post(
+        f"/posts/{post.id}/media",
+        content=body,
+        headers={"content-type": f"multipart/form-data; boundary={boundary}"},
+    )
 
     assert "media_err" in response.headers["location"]
     assert _items(db_session) == []
