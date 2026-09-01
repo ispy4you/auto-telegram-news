@@ -33,6 +33,16 @@ class CSRFMiddleware(BaseHTTPMiddleware):
                     form_token = (parsed.get("csrf_token") or [""])[0]
                 except Exception:
                     pass
+            elif "multipart/form-data" in content_type:
+                # Так приходит загрузка файлов. Тело уже прочитано выше, поэтому
+                # разбор идёт по кэшу, а обработчик маршрута читает его заново
+                # сам — своей копией формы.
+                try:
+                    form = await request.form()
+                    form_token = str(form.get("csrf_token") or "")
+                    await form.close()
+                except Exception:
+                    pass
             if not session_token or not hmac.compare_digest(form_token, session_token):
                 return Response("Forbidden: недействительный CSRF-токен", status_code=403)
 

@@ -137,6 +137,9 @@ flowchart TD
 - Manual editing of AI-generated text before publishing.
 - Publish the original text without AI processing.
 - Re-generate already-processed posts.
+- **Own media**: upload your own photo or video (JPEG/PNG/WebP/MP4), reorder the album, or drop
+  a file that came with a watermark. Uploaded files live on the container disk and do not
+  survive a redeploy — the panel says so instead of silently publishing without them.
 - **Compose tab**: paste your own text and get a post written by the same prompt — useful for
   news that arrived outside the tracked channels.
 - **Telegram-style preview** right on the post page: message bubble, media grid, character

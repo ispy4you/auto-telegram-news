@@ -10,7 +10,7 @@ from telethon import TelegramClient
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
 
 from app.config import get_settings
-from app.models import ActionLog, MediaItem, MediaType, RawPost, SourceChannel
+from app.models import ActionLog, MediaItem, MediaOrigin, MediaType, RawPost, SourceChannel
 from app.services import settings_registry, telegram_session_store
 from app.services.media_storage import MediaStorageService
 
@@ -219,7 +219,10 @@ class TelegramReaderService:
         правды по медиа — сам Telegram, сообщение по-прежнему лежит в канале.
         Возвращает число восстановленных файлов.
         """
-        missing = [m for m in raw_post.media_items if not Path(m.file_path).exists()]
+        missing = [
+            m for m in raw_post.media_items
+            if m.origin != MediaOrigin.MANUAL.value and not Path(m.file_path).exists()
+        ]
         if not missing:
             return 0
         source = raw_post.source

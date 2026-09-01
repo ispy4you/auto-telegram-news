@@ -1,8 +1,38 @@
+"""Файлы медиа на диске: куда класть и что принимать от редактора.
+
+Диск на хостинге — кэш: после деплоя он пуст. Для медиа из каналов это
+не беда, оно перекачивается из Telegram. У файла, который редактор загрузил
+сам, второго экземпляра нет: он живёт до ближайшего перезапуска, и это
+осознанный размен — хранилище ради одной картинки заводить дороже.
+"""
+
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
 from app.config import get_settings
+from app.models import MediaType
 from app.services import settings_registry
+
+#: Что принимаем от редактора: content-type браузера → расширение и тип для
+#: отправки. Список короткий намеренно — это ровно то, что Telegram кладёт
+#: в альбом без сюрпризов.
+UPLOAD_TYPES = {
+    "image/jpeg": ("jpg", MediaType.PHOTO.value),
+    "image/png": ("png", MediaType.PHOTO.value),
+    "image/webp": ("webp", MediaType.PHOTO.value),
+    "video/mp4": ("mp4", MediaType.VIDEO.value),
+}
+
+#: Больше десяти файлов Telegram в один альбом не соберёт.
+MAX_ITEMS_PER_POST = 10
+
+#: Читаем и пишем кусками: 50-мегабайтное видео не должно оказаться в памяти.
+CHUNK = 1024 * 1024
+
+
+class UploadRejected(RuntimeError):
+    """Файл не приняли. Текст исключения уже человеческий — его и показываем."""
 
 
 class MediaStorageService:
@@ -20,3 +50,42 @@ class MediaStorageService:
             return True
         max_mb = settings_registry.get("max_media_mb")
         return file_size <= max_mb * 1024 * 1024
+
+    async def save_upload(self, upload, source_id: int, post_id: int, db=None) -> dict:
+        """Кладёт загруженный файл на диск и описывает его для MediaItem.
+
+        Имя файла придумываем сами: имя из браузера — это данные пользователя,
+        и в пути ему делать нечего.
+        """
+        label = (upload.filename or "файл")[:80]
+        content_type = (upload.content_type or "").split(";")[0].strip().lower()
+        if content_type not in UPLOAD_TYPES:
+            raise UploadRejected(f"«{label}»: принимаем только JPEG, PNG, WebP и MP4.")
+
+        extension, media_type = UPLOAD_TYPES[content_type]
+        max_mb = settings_registry.get("max_media_mb", db)
+        target = self.build_dir(source_id, post_id) / f"manual_{secrets.token_hex(6)}.{extension}"
+
+        size = 0
+        try:
+            with target.open("wb") as out:
+                while True:
+                    chunk = await upload.read(CHUNK)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+                    if size > max_mb * 1024 * 1024:
+                        raise UploadRejected(f"«{label}»: файл больше {max_mb} МБ.")
+                    out.write(chunk)
+            if size == 0:
+                raise UploadRejected(f"«{label}»: пустой файл.")
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise
+
+        return {
+            "path": str(target),
+            "media_type": media_type,
+            "file_size": size,
+            "mime_type": content_type,
+        }
