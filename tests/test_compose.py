@@ -1,10 +1,13 @@
 """Вкладка «Генерация»: текст вставляют руками, дальше — обычный пост.
 
-Проверяем три вещи: удачная генерация заводит настоящий пост с черновиком,
+Проверяем главное: удачная генерация заводит настоящий пост с черновиком,
 любая осечка возвращает набранный текст обратно в поле и ничего не создаёт,
-а служебный источник не притворяется каналом.
+служебный источник не притворяется каналом, а сам ручной пост дедупликации
+не мешает и виден ей как образец.
 """
 
+import asyncio
+import re
 from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import select
@@ -27,11 +30,22 @@ def _compose(client, csrf, text=TEXT):
     return client.post("/compose", data={"csrf_token": csrf(client, "/compose"), "source_text": text})
 
 
+FIELD = re.compile(r'<textarea[^>]*name="source_text"[^>]*>(.*?)</textarea>', re.S)
+
+
+def _field_value(page: str) -> str:
+    """Что осталось в поле ввода — именно оно, а не просто «текст где-то на странице»."""
+    match = FIELD.search(page)
+    assert match, "на странице нет поля для текста"
+    return match.group(1)
+
+
 def test_the_tab_offers_a_field_and_says_where_the_rules_live(logged_in):
     page = logged_in.get("/compose").text
 
     assert 'name="source_text"' in page
     assert 'href="/settings"' in page
+    assert 'href="/compose"' in logged_in.get("/posts").text, "вкладки нет в меню"
 
 
 def test_generated_text_becomes_a_post_with_a_draft(logged_in, csrf, db_session):
@@ -48,13 +62,19 @@ def test_generated_text_becomes_a_post_with_a_draft(logged_in, csrf, db_session)
     assert draft.status == GeneratedPostStatus.DRAFT.value
 
 
-def test_a_manual_post_skips_dedup_and_autopublish(logged_in, csrf, db_session):
-    """Оба этапа работают по статусам NEW и READY — ручной пост в них не попадает."""
+def test_the_pipeline_does_not_touch_a_manual_post(logged_in, csrf, db_session):
+    """Дедупликация и автопубликация работают по NEW и READY — ручной пост не их дело."""
+    from app.services.news_pipeline import NewsPipelineService
+
     with patch("app.services.ai_gateway.AiGatewayClient.generate", _answer()):
         _compose(logged_in, csrf)
-
     post = db_session.scalar(select(RawPost))
     assert post.status == RawPostStatus.GENERATED.value
+
+    asyncio.run(NewsPipelineService().process_ready_posts(db_session))
+
+    assert post.status == RawPostStatus.GENERATED.value
+    assert post.duplicate_of_id is None
 
 
 def test_the_model_gets_the_pasted_text(logged_in, csrf):
@@ -74,7 +94,7 @@ def test_a_refusal_keeps_the_text_and_creates_nothing(logged_in, csrf, db_sessio
         page = _compose(logged_in, csrf).text
 
     assert "Это реклама, а не новость" in page
-    assert TEXT in page, "набранный руками текст терять нельзя"
+    assert _field_value(page) == TEXT, "набранный руками текст терять нельзя"
     assert db_session.scalars(select(RawPost)).all() == []
 
 
@@ -84,7 +104,7 @@ def test_a_broken_gateway_keeps_the_text_and_creates_nothing(logged_in, csrf, db
         page = _compose(logged_in, csrf).text
 
     assert "AI gateway недоступен" in page
-    assert TEXT in page
+    assert _field_value(page) == TEXT
     assert db_session.scalars(select(RawPost)).all() == []
     assert db_session.scalar(select(ActionLog).where(ActionLog.action == "ai_error")) is not None
 

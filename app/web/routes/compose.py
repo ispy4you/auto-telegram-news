@@ -59,7 +59,7 @@ async def compose_generate(
     # Текст всегда возвращается в поле: он набран руками, и терять его при
     # любой осечке — худшее, что может сделать эта страница.
     if result.failed:
-        db.add(ActionLog(action="ai_error", entity_type="Compose", entity_id="-", message=result.reason[:500]))
+        db.add(ActionLog(action="ai_error", entity_type="Compose", entity_id="manual", message=result.reason[:500]))
         db.commit()
         return _page(request, db, text, error=result.reason)
 
