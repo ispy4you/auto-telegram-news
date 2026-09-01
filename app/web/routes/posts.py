@@ -220,6 +220,11 @@ def _media_post(db: Session, post_id: int) -> RawPost | None:
     )
 
 
+def _discard(saved: list[dict]) -> None:
+    for item in saved:
+        Path(item["path"]).unlink(missing_ok=True)
+
+
 def _sync_media_counters(db: Session, post: RawPost) -> None:
     """has_media и media_count — не украшение: по ним решают, что публиковать."""
     count = db.scalar(
@@ -258,14 +263,18 @@ async def add_post_media(
 
     storage = media_storage.MediaStorageService()
     saved: list[dict] = []
-    for upload in chosen:
-        try:
+    try:
+        for upload in chosen:
             saved.append(await storage.save_upload(upload, post.source_id, post.id, db))
-        except media_storage.UploadRejected as exc:
-            # Всё или ничего: половина загруженного альбома хуже, чем понятный отказ.
-            for done in saved:
-                Path(done["path"]).unlink(missing_ok=True)
-            return _back_to_post(post_id, media_error=str(exc))
+    except media_storage.UploadRejected as exc:
+        # Всё или ничего: половина загруженного альбома хуже, чем понятный отказ.
+        _discard(saved)
+        return _back_to_post(post_id, media_error=str(exc))
+    except Exception:
+        # Кончилось место, сорвался диск — файлов в базе быть не должно, а
+        # недописанным огрызкам на диске тем более.
+        _discard(saved)
+        raise
 
     last = max((item.sort_order for item in post.media_items), default=-1)
     for offset, item in enumerate(saved, start=1):
@@ -324,6 +333,9 @@ def move_post_media(
     """Порядок файлов = порядок в альбоме, а первый ещё и несёт подпись."""
     post = _media_post(db, post_id)
     if not post:
+        return _back_to_post(post_id)
+
+    if direction not in ("up", "down"):
         return _back_to_post(post_id)
 
     items = sorted(post.media_items, key=lambda m: (m.sort_order, m.id))

@@ -70,6 +70,14 @@ def test_the_uploaded_file_is_not_named_by_the_browser(logged_in, csrf, db_sessi
     assert media_root in stored.parents
 
 
+def test_an_empty_field_is_not_an_upload(logged_in, csrf, db_session, post, media_root):
+    """Браузер присылает пустую часть, когда файл не выбран."""
+    response = _upload(logged_in, csrf, post.id, [("files", ("", b"", "application/octet-stream"))])
+
+    assert "media_err" in response.headers["location"]
+    assert _items(db_session) == []
+
+
 def test_a_forbidden_type_is_refused(logged_in, csrf, db_session, post, media_root):
     response = _upload(logged_in, csrf, post.id, [("files", ("script.txt", b"hello", "text/plain"))])
 
