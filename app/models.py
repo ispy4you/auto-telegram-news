@@ -44,6 +44,13 @@ class MediaType(str, Enum):
     UNKNOWN = "unknown"
 
 
+class MediaOrigin(str, Enum):
+    #: Приехало из канала: диск — кэш, оригинал по-прежнему лежит в Telegram.
+    SOURCE = "source"
+    #: Загрузил редактор: второго экземпляра нет нигде, восстанавливать неоткуда.
+    MANUAL = "manual"
+
+
 class Project(Base):
     __tablename__ = "projects"
 
@@ -146,6 +153,8 @@ class MediaItem(Base):
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
     duration: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    #: Откуда файл. От этого зависит, можно ли перекачать его из источника.
+    origin: Mapped[str] = mapped_column(String(16), default=MediaOrigin.SOURCE.value)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     raw_post = relationship("RawPost", back_populates="media_items")

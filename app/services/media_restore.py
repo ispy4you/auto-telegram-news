@@ -16,7 +16,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.models import RawPost
+from app.models import MediaOrigin, RawPost
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,19 @@ def reset_state() -> None:
 
 
 def missing_media(raw_post: RawPost) -> list:
-    return [item for item in raw_post.media_items if not Path(item.file_path).exists()]
+    """Пропавшие файлы, которые есть откуда взять: только пришедшие из канала."""
+    return [
+        item for item in raw_post.media_items
+        if item.origin != MediaOrigin.MANUAL.value and not Path(item.file_path).exists()
+    ]
+
+
+def lost_media(raw_post: RawPost) -> list:
+    """Пропавшие файлы редактора: восстанавливать их неоткуда, только загрузить заново."""
+    return [
+        item for item in raw_post.media_items
+        if item.origin == MediaOrigin.MANUAL.value and not Path(item.file_path).exists()
+    ]
 
 
 async def restore(db: Session, raw_post: RawPost) -> dict:

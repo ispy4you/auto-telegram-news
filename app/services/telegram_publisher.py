@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.services import message_entities, post_lifecycle, settings_registry
+from app.services import media_restore, message_entities, post_lifecycle, settings_registry
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, TargetChannel
 
 logger = logging.getLogger(__name__)
@@ -166,8 +166,10 @@ class TelegramPublisherService:
 
         try:
             media = sorted(raw_post.media_items, key=lambda m: m.sort_order)
-            if include_media and any(not Path(m.file_path).exists() for m in media):
-                # Диск не переживает деплой, а сообщение в исходном канале — переживает.
+            if include_media and media_restore.missing_media(raw_post):
+                # Диск не переживает деплой, а сообщение в исходном канале —
+                # переживает. Файл, загруженный редактором, в этот список не
+                # попадает: перекачивать его неоткуда.
                 await self._restore_missing_media(db, raw_post)
 
             existing_media = [m for m in media if Path(m.file_path).exists()] if include_media else []
