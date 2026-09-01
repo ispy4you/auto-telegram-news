@@ -61,6 +61,28 @@ def test_an_uploaded_photo_becomes_part_of_the_post(logged_in, csrf, db_session,
     assert post.has_media is True and post.media_count == 1
 
 
+def test_a_multi_megabyte_file_arrives_whole(logged_in, csrf, db_session, post, media_root):
+    """Файл читается кусками по мегабайту — склейка кусков должна быть точной.
+
+    Заодно это проверка, что многомегабайтная часть multipart вообще доезжает:
+    до маршрута она идёт через CSRF-middleware и разбор формы.
+    """
+    big = JPEG + bytes(range(256)) * 12000  # чуть больше 3 МБ
+
+    _upload(logged_in, csrf, post.id, _photo(content=big))
+
+    stored = Path(_items(db_session)[0].file_path)
+    assert stored.stat().st_size == len(big)
+    assert stored.read_bytes() == big
+
+
+def test_an_empty_file_is_refused(logged_in, csrf, db_session, post, media_root):
+    _upload(logged_in, csrf, post.id, _photo(content=b""))
+
+    assert _items(db_session) == []
+    assert list(media_root.rglob("*.jpg")) == []
+
+
 def test_the_uploaded_file_is_not_named_by_the_browser(logged_in, csrf, db_session, post, media_root):
     """Имя из браузера — данные пользователя, в пути на диске им делать нечего."""
     _upload(logged_in, csrf, post.id, _photo(name="../../evil.jpg"))
