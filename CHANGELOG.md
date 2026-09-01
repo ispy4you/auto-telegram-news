@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.4.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.3.0...v1.4.0) (2026-09-01)
+
+
+### Features
+
+* add a per-setting reset to default ([#30](https://github.com/ispy4you/auto-telegram-news/issues/30)) ([a1ab7bd](https://github.com/ispy4you/auto-telegram-news/commit/a1ab7bd4ef258ae5deefb58b3936a23c2f1fa8bd))
+* fetch lost media when the post page opens ([#33](https://github.com/ispy4you/auto-telegram-news/issues/33)) ([5eed828](https://github.com/ispy4you/auto-telegram-news/commit/5eed8287f7b62b2b63fec188864516edda56da1e))
+* full Telegram formatting in the post editor ([#35](https://github.com/ispy4you/auto-telegram-news/issues/35)) ([00d8781](https://github.com/ispy4you/auto-telegram-news/commit/00d8781f7fa9935239b7d538a5fd4a339c0bed8f))
+* let a post be published as a Telegram quote ([#32](https://github.com/ispy4you/auto-telegram-news/issues/32)) ([f729867](https://github.com/ispy4you/auto-telegram-news/commit/f72986754cf0b96aee35dc55f94acf254e55de2c))
+* make the Telegram login understandable ([#27](https://github.com/ispy4you/auto-telegram-news/issues/27)) ([01ccaf4](https://github.com/ispy4you/auto-telegram-news/commit/01ccaf4ba4c6ced9011a02494cf543fb06cd0d4d))
+* вкладка «Генерация» — пост из текста, вставленного руками ([#40](https://github.com/ispy4you/auto-telegram-news/issues/40)) ([b99a2af](https://github.com/ispy4you/auto-telegram-news/commit/b99a2af4030d7800db5f4af6c15150c020338e5d))
+* одно поле промпта вместо двух + кнопка проверки ([#37](https://github.com/ispy4you/auto-telegram-news/issues/37)) ([747462f](https://github.com/ispy4you/auto-telegram-news/commit/747462f37fb82256af8b5172711cea1f41b2a066))
+* показать скрытую часть промпта, без права редактировать ([#39](https://github.com/ispy4you/auto-telegram-news/issues/39)) ([28076c1](https://github.com/ispy4you/auto-telegram-news/commit/28076c14f5e749548a4b329ecf7447505eb776b8))
+* своё фото и видео в посте ([#41](https://github.com/ispy4you/auto-telegram-news/issues/41)) ([a6a6922](https://github.com/ispy4you/auto-telegram-news/commit/a6a6922e42949a8e7bc8ed4e7f31488fa4bb52f6))
+
+
+### Bug Fixes
+
+* allow deleting a post that a duplicate points at ([#34](https://github.com/ispy4you/auto-telegram-news/issues/34)) ([fd9e493](https://github.com/ispy4you/auto-telegram-news/commit/fd9e4939262813975e8475d6abad58a85d77da68))
+* name the account without a re-login, show the banner only on connect ([#29](https://github.com/ispy4you/auto-telegram-news/issues/29)) ([9ebca99](https://github.com/ispy4you/auto-telegram-news/commit/9ebca990be59bd0dfe524a6d466d786a3a9442ef))
+* say why the model returned nothing ([#36](https://github.com/ispy4you/auto-telegram-news/issues/36)) ([e55579a](https://github.com/ispy4you/auto-telegram-news/commit/e55579a6ca018b25bbee17530e78139cb3f868df))
+* stop curly braces in the prompt from breaking generation ([#31](https://github.com/ispy4you/auto-telegram-news/issues/31)) ([245c6a2](https://github.com/ispy4you/auto-telegram-news/commit/245c6a2fe52320f871758d6bc16b18c97b263859))
+
 ## [1.3.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.2.1...v1.3.0) (2026-08-25)
 
 
