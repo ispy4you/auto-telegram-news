@@ -6,13 +6,18 @@
 осознанный размен — хранилище ради одной картинки заводить дороже.
 """
 
+import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
+
 from app.config import get_settings
 from app.models import MediaType
 from app.services import settings_registry
+
+logger = logging.getLogger(__name__)
 
 #: Что принимаем от редактора: content-type браузера → расширение и тип для
 #: отправки. Список короткий намеренно — это ровно то, что Telegram кладёт
@@ -23,6 +28,12 @@ UPLOAD_TYPES = {
     "image/webp": ("webp", MediaType.PHOTO.value),
     "video/mp4": ("mp4", MediaType.VIDEO.value),
 }
+
+#: Telegram отвечает на webp «PHOTO_INVALID_DIMENSIONS»: для него это стикер,
+#: а не фотография. Формат слишком ходовой, чтобы просто его не принимать —
+#: браузеры сохраняют картинки из интернета именно так, — поэтому переводим
+#: в JPEG на загрузке.
+CONVERT_TO_JPEG = {"image/webp"}
 
 #: Больше десяти файлов Telegram в один альбом не соберёт.
 MAX_ITEMS_PER_POST = 10
@@ -83,9 +94,39 @@ class MediaStorageService:
             target.unlink(missing_ok=True)
             raise
 
+        if content_type in CONVERT_TO_JPEG:
+            # Разбор и пересборка картинки — работа процессорная и небыстрая:
+            # на большом файле она заморозила бы и панель, и планировщик.
+            target = await run_in_threadpool(self._to_jpeg, target, label)
+            content_type, size = "image/jpeg", target.stat().st_size
+
         return {
             "path": str(target),
             "media_type": media_type,
             "file_size": size,
             "mime_type": content_type,
         }
+
+    @staticmethod
+    def _to_jpeg(source: Path, label: str) -> Path:
+        """Пересохраняет картинку в JPEG рядом и убирает исходник."""
+        from PIL import Image
+
+        target = source.with_suffix(".jpg")
+        try:
+            with Image.open(source) as image:
+                # Прозрачности в JPEG нет: кладём кадр на белый лист. Через RGBA
+                # к тому же приводятся и палитра, и анимация — берётся первый кадр.
+                frame = image.convert("RGBA")
+                canvas = Image.new("RGB", frame.size, (255, 255, 255))
+                canvas.paste(frame, mask=frame.split()[-1])
+                canvas.save(target, "JPEG", quality=90)
+        except Exception:
+            target.unlink(missing_ok=True)
+            # Разбираться потом придётся по логам: пользователю в лицо ошибка
+            # библиотеки не годится, а знать её причину всё равно надо.
+            logger.warning("Не удалось перекодировать %s в JPEG", source, exc_info=True)
+            raise UploadRejected(f"«{label}»: не удалось прочитать файл как картинку.")
+        finally:
+            source.unlink(missing_ok=True)
+        return target

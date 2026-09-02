@@ -200,6 +200,14 @@
           </div>
           {% endif %}
 
+          {% if g.publish_error %}
+          <div class="alert alert-danger py-2 mb-2" style="font-size:.83rem">
+            <i class="bi bi-send-x me-1"></i><strong>Публикация не прошла.</strong>
+            <div class="mt-1" style="word-break:break-word">{{ g.publish_error }}</div>
+            <div class="text-muted mt-1">Пост цел: устраните причину и отправьте снова.</div>
+          </div>
+          {% endif %}
+
           <div class="row g-0" id="editor-row-{{ g.id }}">
             {# Редактор #}
             <div id="editor-col-{{ g.id }}" class="col-12">

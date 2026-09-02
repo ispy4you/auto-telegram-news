@@ -450,6 +450,10 @@ async def publish_raw_post(
     try:
         await publisher.publish_generated_post(db, generated.id, target_channel_id)
     except Exception as exc:
+        # Причина нужна на странице, а не только в журнале: кнопка «Опубликовать
+        # оригинал» иначе выглядит нажатой впустую.
+        if not generated.publish_error:
+            generated.publish_error = str(exc)[:500]
         db.add(ActionLog(action="publish_raw_error", entity_type="RawPost", entity_id=str(post_id), message=str(exc)))
         db.commit()
     finally:
