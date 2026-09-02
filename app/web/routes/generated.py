@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.models import GeneratedPost, GeneratedPostStatus, RawPost, SourceChannel, TargetChannel
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, SourceChannel, TargetChannel
 from app.services import message_entities, post_lifecycle
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
@@ -58,6 +58,27 @@ def save_generated(
     return RedirectResponse(url="/generated", status_code=302)
 
 
+def _record_publish_failure(db: Session, generated_id: int, exc: Exception) -> None:
+    """Причина отказа должна остаться на посте, а не только в логах.
+
+    Обычно её пишет сам публикатор. Но часть отказов случается раньше первой
+    строчки в базу — например, когда не задан токен бота, — и тогда записать
+    её больше некому.
+    """
+    generated = db.get(GeneratedPost, generated_id)
+    if generated is None or generated.publish_error:
+        return
+    reason = str(exc)[:500]
+    generated.publish_error = reason
+    db.add(ActionLog(
+        action="publish_failed",
+        entity_type="GeneratedPost",
+        entity_id=str(generated_id),
+        message=reason,
+    ))
+    db.commit()
+
+
 @router.post("/generated/{generated_id}/publish")
 async def publish_generated(
     generated_id: int,
@@ -78,10 +99,11 @@ async def publish_generated(
         )
     except Exception as exc:
         # Отказ Telegram — обычное дело: не тот формат картинки, бот не админ
-        # в канале, канал удалён. Публикация уже записала причину в
-        # publish_error и в журнал, так что показывать вместо панели страницу
-        # 500 незачем — возвращаем на пост, где причина и написана.
+        # в канале, канал удалён. Показывать вместо панели страницу 500 незачем,
+        # но и молча возвращать на пост нельзя: тогда кнопка выглядит нажатой
+        # впустую.
         logger.warning("Публикация поста %s сорвалась: %s", generated_id, exc)
+        _record_publish_failure(db, generated_id, exc)
     finally:
         await publisher.close()
     return RedirectResponse(url=f"/posts/{raw_post_id}", status_code=302)

@@ -36,6 +36,26 @@ def test_a_refusal_from_telegram_returns_to_the_post(logged_in, csrf, db_session
 
     assert response.status_code == 302, "страница 500 вместо панели — это не ответ"
     assert response.headers["location"] == f"/posts/{post.id}"
+    # Отказ мог случиться раньше, чем публикатор успел что-то записать —
+    # тогда причину сохраняет сам маршрут, иначе кнопка нажата впустую.
+    assert "PHOTO_INVALID_DIMENSIONS" in logged_in.get(f"/posts/{post.id}").text
+
+
+def test_the_reason_written_by_the_publisher_is_not_overwritten(logged_in, csrf, db_session, source):
+    post, generated, target = _ready_post(db_session, source)
+
+    async def _fail(*_args, **_kwargs):
+        generated.publish_error = "Бот не админ в канале"
+        db_session.commit()
+        raise RuntimeError("Forbidden: bot is not a member of the channel chat")
+
+    with patch("app.services.telegram_publisher.TelegramPublisherService.publish_generated_post", _fail):
+        logged_in.post(f"/generated/{generated.id}/publish", data={
+            "csrf_token": csrf(logged_in, f"/posts/{post.id}"),
+            "target_channel_id": str(target.id),
+        })
+
+    assert db_session.scalar(select(GeneratedPost)).publish_error == "Бот не админ в канале"
 
 
 def test_the_reason_is_visible_on_the_post(logged_in, db_session, source):
