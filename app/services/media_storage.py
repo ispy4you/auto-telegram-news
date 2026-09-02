@@ -10,6 +10,8 @@ import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 
+from starlette.concurrency import run_in_threadpool
+
 from app.config import get_settings
 from app.models import MediaType
 from app.services import settings_registry
@@ -90,7 +92,9 @@ class MediaStorageService:
             raise
 
         if content_type in CONVERT_TO_JPEG:
-            target = self._to_jpeg(target, label)
+            # Разбор и пересборка картинки — работа процессорная и небыстрая:
+            # на большом файле она заморозила бы и панель, и планировщик.
+            target = await run_in_threadpool(self._to_jpeg, target, label)
             content_type, size = "image/jpeg", target.stat().st_size
 
         return {

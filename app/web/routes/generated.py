@@ -65,6 +65,10 @@ def _record_publish_failure(db: Session, generated_id: int, exc: Exception) -> N
     строчки в базу — например, когда не задан токен бота, — и тогда записать
     её больше некому.
     """
+    # Сорвавшаяся отправка могла оставить сессию в незакрытой транзакции —
+    # тогда любой следующий запрос к ней упал бы. Публикатор всё, что успел
+    # записать, уже зафиксировал, так что терять здесь нечего.
+    db.rollback()
     generated = db.get(GeneratedPost, generated_id)
     if generated is None or generated.publish_error:
         return
