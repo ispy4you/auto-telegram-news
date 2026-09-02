@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.4.0...v1.4.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* webp переводим в JPEG, а отказ Telegram больше не страница 500 ([#42](https://github.com/ispy4you/auto-telegram-news/issues/42)) ([634f262](https://github.com/ispy4you/auto-telegram-news/commit/634f2625f3c825d1d22130d46e7b2eadd16da5d3))
+
 ## [1.4.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.3.0...v1.4.0) (2026-09-01)
 
 
