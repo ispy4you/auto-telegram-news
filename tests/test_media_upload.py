@@ -5,6 +5,7 @@
 честно: не ходить за таким файлом в Telegram и не молчать о пропаже.
 """
 
+import io
 from pathlib import Path
 
 import pytest
@@ -81,6 +82,35 @@ def test_an_empty_file_is_refused(logged_in, csrf, db_session, post, media_root)
 
     assert _items(db_session) == []
     assert list(media_root.rglob("*.jpg")) == []
+
+
+def test_a_webp_is_stored_as_jpeg(logged_in, csrf, db_session, post, media_root):
+    """Telegram отвечает на webp PHOTO_INVALID_DIMENSIONS — переводим на загрузке."""
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGBA", (8, 8), (10, 20, 30, 128)).save(buffer, "WEBP")
+
+    _upload(logged_in, csrf, post.id, _photo(name="из-интернета.webp",
+                                             content=buffer.getvalue(),
+                                             content_type="image/webp"))
+
+    item = _items(db_session)[0]
+    stored = Path(item.file_path)
+    assert stored.suffix == ".jpg"
+    assert item.mime_type == "image/jpeg"
+    assert item.media_type == "photo"
+    with Image.open(stored) as converted:
+        assert converted.format == "JPEG"
+    assert list(media_root.rglob("*.webp")) == [], "исходник не должен оставаться на диске"
+
+
+def test_a_file_that_is_not_really_an_image_is_refused(logged_in, csrf, db_session, post, media_root):
+    _upload(logged_in, csrf, post.id, _photo(name="fake.webp", content=b"RIFF not an image at all",
+                                             content_type="image/webp"))
+
+    assert _items(db_session) == []
+    assert list(media_root.rglob("*.*")) == []
 
 
 def test_the_uploaded_file_is_not_named_by_the_browser(logged_in, csrf, db_session, post, media_root):

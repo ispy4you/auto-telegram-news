@@ -24,6 +24,12 @@ UPLOAD_TYPES = {
     "video/mp4": ("mp4", MediaType.VIDEO.value),
 }
 
+#: Telegram отвечает на webp «PHOTO_INVALID_DIMENSIONS»: для него это стикер,
+#: а не фотография. Формат слишком ходовой, чтобы просто его не принимать —
+#: браузеры сохраняют картинки из интернета именно так, — поэтому переводим
+#: в JPEG на загрузке.
+CONVERT_TO_JPEG = {"image/webp"}
+
 #: Больше десяти файлов Telegram в один альбом не соберёт.
 MAX_ITEMS_PER_POST = 10
 
@@ -83,9 +89,34 @@ class MediaStorageService:
             target.unlink(missing_ok=True)
             raise
 
+        if content_type in CONVERT_TO_JPEG:
+            target = self._to_jpeg(target, label)
+            content_type, size = "image/jpeg", target.stat().st_size
+
         return {
             "path": str(target),
             "media_type": media_type,
             "file_size": size,
             "mime_type": content_type,
         }
+
+    @staticmethod
+    def _to_jpeg(source: Path, label: str) -> Path:
+        """Пересохраняет картинку в JPEG рядом и убирает исходник."""
+        from PIL import Image
+
+        target = source.with_suffix(".jpg")
+        try:
+            with Image.open(source) as image:
+                # Прозрачность в JPEG не живёт: кладём кадр на белый лист.
+                # Заодно это приводит к RGB палитру и анимацию (берётся первый кадр).
+                frame = image.convert("RGBA")
+                canvas = Image.new("RGB", frame.size, (255, 255, 255))
+                canvas.paste(frame, mask=frame.split()[-1])
+                canvas.save(target, "JPEG", quality=90)
+        except Exception:
+            target.unlink(missing_ok=True)
+            raise UploadRejected(f"«{label}»: не удалось прочитать файл как картинку.")
+        finally:
+            source.unlink(missing_ok=True)
+        return target

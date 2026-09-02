@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, select
@@ -9,6 +11,8 @@ from app.services import message_entities, post_lifecycle
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
 from app.web.routes.common import GENERATED_PER_PAGE, current_project_id, tpl
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -72,6 +76,12 @@ async def publish_generated(
             db, generated_id, target_channel_id,
             include_media=include_media == "on",
         )
+    except Exception as exc:
+        # Отказ Telegram — обычное дело: не тот формат картинки, бот не админ
+        # в канале, канал удалён. Публикация уже записала причину в
+        # publish_error и в журнал, так что показывать вместо панели страницу
+        # 500 незачем — возвращаем на пост, где причина и написана.
+        logger.warning("Публикация поста %s сорвалась: %s", generated_id, exc)
     finally:
         await publisher.close()
     return RedirectResponse(url=f"/posts/{raw_post_id}", status_code=302)
