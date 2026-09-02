@@ -6,6 +6,7 @@
 осознанный размен — хранилище ради одной картинки заводить дороже.
 """
 
+import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
@@ -15,6 +16,8 @@ from starlette.concurrency import run_in_threadpool
 from app.config import get_settings
 from app.models import MediaType
 from app.services import settings_registry
+
+logger = logging.getLogger(__name__)
 
 #: Что принимаем от редактора: content-type браузера → расширение и тип для
 #: отправки. Список короткий намеренно — это ровно то, что Telegram кладёт
@@ -112,14 +115,17 @@ class MediaStorageService:
         target = source.with_suffix(".jpg")
         try:
             with Image.open(source) as image:
-                # Прозрачность в JPEG не живёт: кладём кадр на белый лист.
-                # Заодно это приводит к RGB палитру и анимацию (берётся первый кадр).
+                # Прозрачности в JPEG нет: кладём кадр на белый лист. Через RGBA
+                # к тому же приводятся и палитра, и анимация — берётся первый кадр.
                 frame = image.convert("RGBA")
                 canvas = Image.new("RGB", frame.size, (255, 255, 255))
                 canvas.paste(frame, mask=frame.split()[-1])
                 canvas.save(target, "JPEG", quality=90)
         except Exception:
             target.unlink(missing_ok=True)
+            # Разбираться потом придётся по логам: пользователю в лицо ошибка
+            # библиотеки не годится, а знать её причину всё равно надо.
+            logger.warning("Не удалось перекодировать %s в JPEG", source, exc_info=True)
             raise UploadRejected(f"«{label}»: не удалось прочитать файл как картинку.")
         finally:
             source.unlink(missing_ok=True)
