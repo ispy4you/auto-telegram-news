@@ -18,13 +18,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Внешний ключ ставим сразу: связь необязательная, но висячий prompt_id —
-    # это молча сломанная генерация, а не мелочь. Перед удалением промпта код
-    # снимает его с каналов сам.
-    op.add_column(
-        "target_channels",
-        sa.Column("prompt_id", sa.Integer(), sa.ForeignKey("prompts.id"), nullable=True),
-    )
+    # Без внешнего ключа: SQLite не умеет добавлять его ALTER-ом (нужен был бы
+    # batch-режим с перестройкой таблицы), а защищать тут особо нечего. Ссылка
+    # на удалённый промпт означает «промпта нет», и генерация берёт основной —
+    # это проверено тестом. Удаление промпта всё равно снимает его с каналов.
+    op.add_column("target_channels", sa.Column("prompt_id", sa.Integer(), nullable=True))
 
 
 def downgrade() -> None:

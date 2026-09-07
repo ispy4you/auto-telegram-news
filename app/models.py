@@ -97,7 +97,12 @@ class TargetChannel(Base):
     #: Промпт по умолчанию для постов, идущих в этот канал. Именно «по
     #: умолчанию», а не «промпт канала»: пост генерируется один раз на все
     #: каналы маршрута, поэтому при двух разных промптах сработает первый.
-    prompt_id: Mapped[int | None] = mapped_column(ForeignKey("prompts.id"), nullable=True)
+    #:
+    #: Без внешнего ключа: SQLite не умеет добавлять его ALTER-ом, а защищать
+    #: тут особо нечего — ссылка на удалённый промпт означает «промпта нет»,
+    #: и генерация просто берёт основной. Удаление промпта всё равно снимает
+    #: его с каналов, чтобы в интерфейсе не висело пустое место.
+    prompt_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
