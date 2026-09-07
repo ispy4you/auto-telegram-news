@@ -313,10 +313,12 @@ class TelegramEventListenerService:
                 if not source or not source.username:
                     continue
                 try:
-                    pending, last_msg_id = await self._reader._collect_pending(
+                    pending, last_msg_id, skipped_old = await self._reader._collect_pending(
                         client, db, source, limit=50
                     )
-                    count = self._reader._flush_pending(db, source, pending, last_msg_id)
+                    count = self._reader._flush_pending(
+                        db, source, pending, last_msg_id, skipped_old
+                    )
                     if count:
                         logger.info("Catch-up @%s: %d новых постов", source.username, count)
                 except IntegrityError:
