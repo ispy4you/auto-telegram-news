@@ -38,6 +38,7 @@ class SchedulerService:
         self._last_draft_notified: int = 0
         self._last_prune_at: datetime | None = None
         self._last_fetch_at: datetime | None = None
+        self.last_run_error: str | None = None
 
     @property
     def next_run_at(self) -> datetime | None:
@@ -134,6 +135,7 @@ class SchedulerService:
             async with self._lock:
                 self.is_running = True
                 self.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                self.last_run_error = None
                 with SessionLocal() as db:
                     try:
                         skip_fetch = not self._should_fetch(force_fetch)
@@ -163,6 +165,9 @@ class SchedulerService:
                         db.commit()
                         self._prune_if_due(db)
                     except Exception as exc:
+                        # Кнопка «Собрать сейчас» читает это, чтобы не отрапортовать
+                        # об успешном прогоне, который на самом деле упал.
+                        self.last_run_error = str(exc)[:300]
                         logger.exception("Scheduler run failed")
                         # Сессия может быть в PendingRollbackError после IntegrityError —
                         # откатываем перед любым дальнейшим использованием.

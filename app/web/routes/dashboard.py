@@ -95,14 +95,17 @@ async def fetch_now(request: Request, db: Session = Depends(get_db), _: bool = D
     sched = getattr(request.app.state, "scheduler", None)
     if sched:
         fetched = await sched.trigger_run(force_fetch=True)
+        failure = getattr(sched, "last_run_error", None)
     else:
         await NewsPipelineService().run_once(db)
-        fetched = 0
+        fetched, failure = 0, None
 
     if fetched is None:
         params = {"error": "Сбор уже идёт — подождите окончания текущего прогона."}
+    elif failure:
+        params = {"error": f"Прогон завершился ошибкой: {failure}"}
     elif fetched:
         params = {"ok": f"Собрано новых постов: {fetched}."}
     else:
-        params = {"ok": "Сбор выполнен, новых постов нет. Ошибки — в списке событий ниже."}
+        params = {"ok": "Сбор выполнен, новых постов нет. Ошибки по отдельным каналам — в списке событий ниже."}
     return RedirectResponse(url=f"/?{urlencode(params)}", status_code=302)

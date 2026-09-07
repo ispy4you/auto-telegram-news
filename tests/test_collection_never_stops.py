@@ -78,8 +78,9 @@ def test_manual_collection_ignores_every_pause():
 # ---------------------------------------------------------------------------
 
 class _FakeScheduler:
-    def __init__(self, result):
+    def __init__(self, result, error=None):
         self._result = result
+        self.last_run_error = error
         self.forced = None
 
     async def trigger_run(self, force_fetch: bool = False):
@@ -92,8 +93,8 @@ def with_scheduler(logged_in):
     """Подсовывает приложению планировщик: lifespan в тестах не запускается."""
     import app.main as main_module
 
-    def _install(result):
-        fake = _FakeScheduler(result)
+    def _install(result, error=None):
+        fake = _FakeScheduler(result, error)
         main_module.app.state.scheduler = fake
         return fake
 
@@ -125,6 +126,14 @@ def test_an_empty_run_is_not_reported_as_a_collection(logged_in, csrf, with_sche
     with_scheduler(0)
     response = _press_collect(logged_in, csrf)
     assert "новых постов нет" in logged_in.get(response.headers["location"]).text
+
+
+def test_a_failed_run_is_not_reported_as_success(logged_in, csrf, with_scheduler):
+    """Прогон упал — говорим об этом, а не «новых постов нет»."""
+    with_scheduler(0, error="Сессия Telethon не авторизована")
+    page = logged_in.get(_press_collect(logged_in, csrf).headers["location"])
+    assert "Прогон завершился ошибкой" in page.text
+    assert "Сессия Telethon не авторизована" in page.text
 
 
 def test_a_run_that_did_not_happen_is_not_reported_as_success(logged_in, csrf, with_scheduler):
