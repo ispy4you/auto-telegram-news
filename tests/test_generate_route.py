@@ -28,7 +28,7 @@ def raw_post(db_session, source):
 
 
 def _ai_returns(monkeypatch, result: AiResult) -> None:
-    async def _generate(_self, _post, _db=None):
+    async def _generate(_self, _post, _db=None, rules=None):
         return result
 
     monkeypatch.setattr("app.services.ai_gateway.AiGatewayClient.generate_news_post", _generate)

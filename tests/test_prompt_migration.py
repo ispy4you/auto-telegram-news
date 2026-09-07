@@ -18,12 +18,16 @@ _ROOT = Path(__file__).resolve().parent.parent
 _BEFORE = "0008_generated_post_entities"
 
 
-def _migration():
-    path = _ROOT / "alembic" / "versions" / "0009_single_ai_prompt.py"
-    spec = importlib.util.spec_from_file_location("migration_0009", path)
+def _load(filename: str, name: str):
+    path = _ROOT / "alembic" / "versions" / filename
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _migration():
+    return _load("0009_single_ai_prompt.py", "migration_0009")
 
 
 def _upgraded(tmp_path, monkeypatch, stored: dict[str, str]):
@@ -41,8 +45,13 @@ def _upgraded(tmp_path, monkeypatch, stored: dict[str, str]):
             )
     command.upgrade(cfg, "head")
 
+    # После 0011 склеенный текст лежит не настройкой, а записью в prompts.
+    # None здесь по-прежнему значит «своего текста нет, работает умолчание» —
+    # так эти тесты продолжают проверять склейку, а не то, куда её переложили.
+    default_body = _load("0011_prompts.py", "migration_0011").DEFAULT_BODY
     with engine.begin() as conn:
-        return conn.execute(text("SELECT value FROM app_settings WHERE key = 'ai_prompt'")).scalar()
+        body = conn.execute(text("SELECT body FROM prompts ORDER BY id LIMIT 1")).scalar()
+    return None if body == default_body else body
 
 
 def test_edited_prompts_are_merged_without_the_json_contract(tmp_path, monkeypatch):
