@@ -4,6 +4,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.models import ActionLog, SourceChannel
 
@@ -265,6 +266,11 @@ class TelegramEventListenerService:
                     await self._buffer_album(username, msg, client)
                 else:
                     await self._save_single(username, msg, client)
+            except IntegrityError:
+                # Тот же пост уже записал опрос (uq_source_message). Это гонка
+                # двух здоровых путей сбора, а не потеря поста — тревожить
+                # оператора нечем.
+                logger.debug("Входящий пост уже записан опросом")
             except Exception as exc:
                 # Было logger.debug — при уровне INFO эти строки не печатались
                 # вовсе. Пост, который не удалось сохранить, пропадал бесследно.
@@ -309,6 +315,11 @@ class TelegramEventListenerService:
                     count = self._reader._flush_pending(db, source, pending, last_msg_id)
                     if count:
                         logger.info("Catch-up @%s: %d новых постов", source.username, count)
+                except IntegrityError:
+                    # Опрос по таймеру успел записать тот же пост. Ничего не
+                    # потеряно, и оператору такое показывать незачем.
+                    db.rollback()
+                    logger.debug("Catch-up @%s: пост уже записан опросом", source.username)
                 except Exception as exc:
                     logger.warning("Catch-up ошибка для @%s: %s", source.username, exc)
                     try:

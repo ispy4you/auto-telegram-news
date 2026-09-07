@@ -379,6 +379,7 @@ def test_starting_the_listener_twice_leaves_one_loop(listener):
         await asyncio.sleep(0)  # даём первой петле дойти до своего await
         await listener.start(listener._db_factory)
         second = listener._task
+        await asyncio.sleep(0)  # и второй тоже
 
         try:
             assert first is not second
