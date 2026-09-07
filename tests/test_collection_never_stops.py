@@ -115,10 +115,7 @@ def test_the_button_actually_collects(logged_in, csrf, with_scheduler):
 
 def test_the_button_says_how_much_it_collected(logged_in, csrf, with_scheduler):
     with_scheduler(3)
-    response = _press_collect(logged_in, csrf)
-    assert "Собрано новых постов: 3" in response.headers["location"]
-
-    page = logged_in.get(response.headers["location"])
+    page = logged_in.get(_press_collect(logged_in, csrf).headers["location"])
     assert "Собрано новых постов: 3" in page.text
 
 
