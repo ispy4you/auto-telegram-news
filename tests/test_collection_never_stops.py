@@ -390,3 +390,40 @@ def test_starting_the_listener_twice_leaves_one_loop(listener):
             await listener.stop()
 
     asyncio.run(_scenario())
+
+
+# ---------------------------------------------------------------------------
+# Catch-up при подключении сталкивается с опросом
+# ---------------------------------------------------------------------------
+
+class _CollidingReader:
+    """Догон падает на уникальном индексе: тот же пост уже записал опрос."""
+
+    async def _collect_pending(self, client, db, src, limit=50):
+        return [], None
+
+    def _flush_pending(self, db, src, pending, last_msg_id):
+        from sqlalchemy.exc import IntegrityError
+
+        raise IntegrityError("INSERT", {}, Exception("uq_source_message"))
+
+
+class _BrokenReader:
+    async def _collect_pending(self, client, db, src, limit=50):
+        raise RuntimeError("канал недоступен")
+
+
+def test_a_catchup_collision_with_the_poll_is_not_an_error(listener, db_session, source):
+    listener._reader = _CollidingReader()
+    asyncio.run(listener._catchup(object()))
+    assert db_session.query(ActionLog).count() == 0
+
+
+def test_a_real_catchup_failure_is_still_recorded(listener, db_session, source):
+    """Парный к предыдущему: доказывает, что до источника вообще доходит."""
+    listener._reader = _BrokenReader()
+    asyncio.run(listener._catchup(object()))
+
+    entry = db_session.query(ActionLog).one()
+    assert entry.action == "event_listener_catchup_error"
+    assert "недоступен" in entry.message
