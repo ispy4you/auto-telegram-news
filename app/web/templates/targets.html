@@ -94,6 +94,11 @@
             </form>
           </td>
           <td>
+            {% if t.prompt_id %}
+              {% for p in prompts if p.id == t.prompt_id %}
+              <span class="text-secondary small d-block"><i class="bi bi-card-text me-1"></i>{{ p.name }}</span>
+              {% endfor %}
+            {% endif %}
             {% if t.publish_from and t.publish_to %}
               <span class="text-primary small"><i class="bi bi-clock me-1"></i>{{ t.publish_from }}–{{ t.publish_to }}</span>
             {% else %}
@@ -174,6 +179,18 @@
               <input type="time" class="form-control form-control-sm" style="width:7rem" name="publish_to" value="{{ t.publish_to or '' }}">
               <span class="small text-muted">(оставьте пустым — круглосуточно)</span>
               <button type="submit" class="btn btn-sm btn-primary ms-1">Сохранить</button>
+            </form>
+            <form method="post" action="/targets/{{ t.id }}/prompt" class="d-flex align-items-center gap-2 mt-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <span class="small text-muted me-1">Промпт по умолчанию:</span>
+              <select class="form-select form-select-sm" style="width:16rem" name="prompt_id">
+                <option value="">основной</option>
+                {% for p in prompts %}
+                <option value="{{ p.id }}" {% if t.prompt_id == p.id %}selected{% endif %}>{{ p.name }}</option>
+                {% endfor %}
+              </select>
+              <button type="submit" class="btn btn-sm btn-primary ms-1">Сохранить</button>
+              <span class="small text-muted">для постов, идущих в этот канал; при генерации выбор остаётся</span>
             </form>
           </td>
         </tr>

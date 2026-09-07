@@ -133,7 +133,9 @@
             {% if prompts | length > 1 %}
             <select class="form-select form-select-sm w-auto" name="prompt_id" title="Правила генерации">
               {% for p in prompts %}
-              <option value="{{ p.id }}" {% if p.is_default %}selected{% endif %}>{{ p.name }}{% if p.is_default %} (основной){% endif %}</option>
+              {% set chosen = (suggested_prompt.id if suggested_prompt else none) %}
+              <option value="{{ p.id }}"
+                {% if p.id == chosen or (not chosen and p.is_default) %}selected{% endif %}>{{ p.name }}{% if p.is_default %} (основной){% endif %}</option>
               {% endfor %}
             </select>
             {% endif %}

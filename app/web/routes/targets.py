@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ActionLog, TargetChannel
+from app.models import ActionLog, Prompt, TargetChannel
+from app.services import prompts
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, to_bool, tpl
@@ -21,7 +22,10 @@ def targets(request: Request, db: Session = Depends(get_db), _: bool = Depends(r
     if pid is not None:
         q = q.where(TargetChannel.project_id == pid)
     items = db.scalars(q).all()
-    return tpl(request, "targets.html", db, {"items": items, "ok": ok, "error": error})
+    return tpl(request, "targets.html", db, {
+        "items": items, "ok": ok, "error": error,
+        "prompts": prompts.all_prompts(db),
+    })
 
 
 @router.post("/targets")
@@ -70,6 +74,35 @@ def edit_target(
         target.username = username.strip().lstrip("@") or None
         db.commit()
     return RedirectResponse(url="/targets?ok=Канал+обновлён", status_code=302)
+
+
+@router.post("/targets/{target_id}/prompt")
+def update_target_prompt(
+    target_id: int,
+    prompt_id: str = Form(""),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
+    """Промпт по умолчанию для постов, идущих в этот канал.
+
+    Именно «по умолчанию»: пост генерируется один раз на все каналы маршрута,
+    поэтому при двух разных промптах сработает промпт первого канала. Ручной
+    выбор на странице поста всё это перебивает.
+    """
+    target = db.get(TargetChannel, target_id)
+    if target is None:
+        return RedirectResponse(url="/targets?error=Канал+не+найден", status_code=302)
+
+    chosen = db.get(Prompt, int(prompt_id)) if prompt_id else None
+    target.prompt_id = chosen.id if chosen else None
+    db.add(ActionLog(
+        action="target_prompt_update",
+        entity_type="TargetChannel",
+        entity_id=str(target.id),
+        message=f"Промпт «{target.title}»: {chosen.name if chosen else 'основной'}",
+    ))
+    db.commit()
+    return RedirectResponse(url="/targets?ok=Промпт+канала+обновлён", status_code=302)
 
 
 @router.post("/targets/{target_id}/schedule")
