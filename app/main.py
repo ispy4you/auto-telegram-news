@@ -28,6 +28,20 @@ logging.basicConfig(
 logging.getLogger("telethon").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
+
+class _SkipHealthAccessLog(logging.Filter):
+    """Health-чек хостинга ходит каждые несколько секунд.
+
+    Хостинг отдаёт только последние 200 строк лога, и все 200 оказывались
+    строками про /health — разобрать по логам реальную проблему было нельзя.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/health" not in record.getMessage()
+
+
+logging.getLogger("uvicorn.access").addFilter(_SkipHealthAccessLog())
+
 logger = logging.getLogger(__name__)
 
 settings = get_settings()

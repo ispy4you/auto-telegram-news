@@ -1,9 +1,10 @@
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.models import ActionLog, SourceChannel
 
@@ -11,6 +12,8 @@ logger = logging.getLogger(__name__)
 
 _RECONNECT_DELAY = 30  # секунд между попытками переподключения
 _SOURCE_RELOAD_INTERVAL = 300  # секунд между обновлением списка каналов
+# Как долго одно и то же состояние считается уже записанным в журнал.
+_NOTE_QUIET_PERIOD = timedelta(hours=1)
 
 
 _ACTIVE_LISTENER = None
@@ -42,6 +45,7 @@ class TelegramEventListenerService:
         # Буфер для альбомов (grouped_id -> list of (username, msg))
         self._album_buffer: dict[int, list] = defaultdict(list)
         self._album_tasks: dict[int, asyncio.Task] = {}
+        self._noted_at: dict[str, datetime] = {}  # сообщение -> когда записали
 
     @property
     def is_active(self) -> bool:
@@ -61,7 +65,8 @@ class TelegramEventListenerService:
         """Живой Telethon-клиент слушателя или None.
 
         Нужен всем, кому иначе пришлось бы поднимать второй клиент на той же
-        сессии: проект этого избегает намеренно, см. is_started.
+        сессии: проект этого избегает намеренно — см. _TELETHON_LOCK, который
+        слушатель держит всё время, пока подключён.
         """
         if self._client is not None and self._client.is_connected():
             return self._client
@@ -70,11 +75,21 @@ class TelegramEventListenerService:
     @property
     def is_started(self) -> bool:
         """True когда listener запущен (включая паузы переподключения).
-        Планировщик использует это чтобы НИКОГДА не создавать конкурирующий
-        Telethon-клиент пока event listener владеет файлом сессии."""
+
+        Планировщик на это больше не смотрит: флаг поднимается при запуске и не
+        опускается никогда, и опрос из-за него вставал насовсем. Осталось только
+        для карточки входа в админке — там это честный признак «служба живёт».
+        """
         return self._started
 
     async def start(self, db_factory) -> None:
+        if self._task is not None and not self._task.done():
+            # Повторный start() без stop() — например, два подряд выхода из
+            # аккаунта в админке. Вторая петля подняла бы второй Telethon-клиент
+            # на той же сессии, а с общим локом просто повисла бы навсегда,
+            # дожидаясь своей очереди, и всплыла бы при следующей остановке.
+            logger.warning("Event listener уже запущен — перезапускаем")
+            await self.stop()
         self._db_factory = db_factory
         self._started = True
         self._task = asyncio.create_task(self._run_loop(), name="tg-event-listener")
@@ -112,6 +127,43 @@ class TelegramEventListenerService:
     # Внутренние методы
     # ------------------------------------------------------------------
 
+    def _note(self, action: str, message: str) -> None:
+        """Записать смену состояния в журнал панели.
+
+        Раньше слушатель сообщал о себе только в stdout контейнера, где эти
+        строки тонут в логе health-чеков. Оператор видел «постов нет» и не мог
+        отличить тишину в каналах от мёртвого соединения.
+
+        Одно и то же состояние пишем не чаще раза в час. Проверять «отличается ли
+        от предыдущего» недостаточно: соединение может мигать, и тогда «подключён»
+        и «отключён» чередуются — каждое отличается от предыдущего, и за сутки
+        получилось бы больше пяти тысяч строк.
+        """
+        if not self._db_factory:
+            return
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        written_at = self._noted_at.get(message)
+        if written_at is not None and now - written_at < _NOTE_QUIET_PERIOD:
+            return
+        try:
+            with self._db_factory() as db:
+                db.add(ActionLog(
+                    action=action,
+                    entity_type="EventListener",
+                    entity_id="telethon",
+                    message=message[:500],
+                ))
+                db.commit()
+        except Exception:
+            # Не помечаем состояние записанным: иначе одна неудачная вставка
+            # навсегда спрятала бы эту строку из журнала.
+            logger.warning("Не удалось записать состояние слушателя в журнал", exc_info=True)
+            return
+        if len(self._noted_at) > 50:
+            # Текст ошибки попадает в ключ, так что словарь в теории может расти.
+            self._noted_at.clear()
+        self._noted_at[message] = now
+
     async def _run_loop(self) -> None:
         from app.services.telegram_reader import TelegramReaderService
         self._reader = TelegramReaderService()
@@ -119,6 +171,14 @@ class TelegramEventListenerService:
         while True:
             try:
                 await self._connect_and_listen()
+                # run_until_disconnected() возвращается штатно, когда Telegram
+                # закрыл соединение. Без паузы здесь цикл переподключался бы
+                # вплотную и молча — обрыв выглядел бы как нормальная работа.
+                self._note(
+                    "listener_disconnected",
+                    "Соединение с Telegram закрыто, переподключаемся.",
+                )
+                logger.warning("Event listener: соединение закрыто — переподключение через %ds", _RECONNECT_DELAY)
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -127,12 +187,28 @@ class TelegramEventListenerService:
                     "Event listener отключился: %s — переподключение через %ds",
                     exc, _RECONNECT_DELAY,
                 )
-                try:
-                    await asyncio.sleep(_RECONNECT_DELAY)
-                except asyncio.CancelledError:
-                    raise
+                self._note(
+                    "listener_needs_login" if self._needs_login else "listener_error",
+                    f"Слушатель Telegram отключён: {exc}",
+                )
+            try:
+                await asyncio.sleep(_RECONNECT_DELAY)
+            except asyncio.CancelledError:
+                raise
 
     async def _connect_and_listen(self) -> None:
+        """Держит лок всё время, пока клиент подключён.
+
+        Опрос по таймеру берёт тот же лок, поэтому два клиента на одной сессии
+        не встретятся — и при этом опрос больше не выключен навсегда одним лишь
+        фактом того, что слушатель когда-то запускался.
+        """
+        from app.services.telegram_reader import _TELETHON_LOCK
+
+        async with _TELETHON_LOCK:
+            await self._connect_and_listen_locked()
+
+    async def _connect_and_listen_locked(self) -> None:
         from telethon import events
 
         from app.services import telegram_session_store
@@ -171,6 +247,10 @@ class TelegramEventListenerService:
         await self.reload_sources()
         self._active = True
         logger.info("Event listener активен, слушает %d каналов", len(self._source_usernames))
+        self._note(
+            "listener_connected",
+            f"Слушатель Telegram подключён, каналов в мониторинге: {len(self._source_usernames)}.",
+        )
 
         await self._catchup(client)
 
@@ -190,8 +270,16 @@ class TelegramEventListenerService:
                     await self._buffer_album(username, msg, client)
                 else:
                     await self._save_single(username, msg, client)
+            except IntegrityError:
+                # Тот же пост уже записал опрос (uq_source_message). Это гонка
+                # двух здоровых путей сбора, а не потеря поста — тревожить
+                # оператора нечем.
+                logger.debug("Входящий пост уже записан опросом")
             except Exception as exc:
-                logger.debug("Ошибка в event handler: %s", exc)
+                # Было logger.debug — при уровне INFO эти строки не печатались
+                # вовсе. Пост, который не удалось сохранить, пропадал бесследно.
+                logger.warning("Ошибка при сохранении входящего поста: %s", exc, exc_info=True)
+                self._note("listener_save_error", f"Не удалось сохранить входящий пост: {exc}")
         try:
             await client.run_until_disconnected()
         finally:
@@ -231,6 +319,11 @@ class TelegramEventListenerService:
                     count = self._reader._flush_pending(db, source, pending, last_msg_id)
                     if count:
                         logger.info("Catch-up @%s: %d новых постов", source.username, count)
+                except IntegrityError:
+                    # Опрос по таймеру успел записать тот же пост. Ничего не
+                    # потеряно, и оператору такое показывать незачем.
+                    db.rollback()
+                    logger.debug("Catch-up @%s: пост уже записан опросом", source.username)
                 except Exception as exc:
                     logger.warning("Catch-up ошибка для @%s: %s", source.username, exc)
                     try:

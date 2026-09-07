@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -63,6 +64,8 @@ async def dashboard(request: Request, db: Session = Depends(get_db), _: bool = D
         "recent_logs": recent_logs,
         "pending_posts": pending_posts,
         "targets": targets,
+        "ok": request.query_params.get("ok"),
+        "error": request.query_params.get("error"),
     })
 
 
@@ -83,9 +86,26 @@ async def scheduler_status(request: Request, _: bool = Depends(require_auth)):
 
 @router.post("/fetch-now")
 async def fetch_now(request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    """Ручной сбор. Всегда опрашивает каналы и всегда говорит, чем кончилось.
+
+    Раньше кнопка проходила через тот же выключатель, что и автосбор: при
+    работающем слушателе она не опрашивала ничего и всё равно рапортовала об
+    успехе. Нажимаешь — и не понимаешь, сломан сбор или в каналах тихо.
+    """
     sched = getattr(request.app.state, "scheduler", None)
     if sched:
-        await sched.trigger_run()
+        fetched = await sched.trigger_run(force_fetch=True)
+        failure = getattr(sched, "last_run_error", None)
     else:
         await NewsPipelineService().run_once(db)
-    return RedirectResponse(url="/", status_code=302)
+        fetched, failure = 0, None
+
+    if fetched is None:
+        params = {"error": "Сбор уже идёт — подождите окончания текущего прогона."}
+    elif failure:
+        params = {"error": f"Прогон завершился ошибкой: {failure}"}
+    elif fetched:
+        params = {"ok": f"Собрано новых постов: {fetched}."}
+    else:
+        params = {"ok": "Сбор выполнен, новых постов нет. Ошибки по отдельным каналам — в списке событий ниже."}
+    return RedirectResponse(url=f"/?{urlencode(params)}", status_code=302)

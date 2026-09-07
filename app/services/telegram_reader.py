@@ -87,12 +87,26 @@ class TelegramReaderService:
         if not source.username:
             raise ValueError(f"Source {source.id} не имеет username для Telethon")
 
+        # Второй Telethon-клиент на одной сессии Telegram считает поводом
+        # отозвать ключ. Если слушатель уже держит соединение — опрашиваем его
+        # клиентом; иначе поднимаем свой под общим локом, чтобы слушатель не
+        # подключился в этот момент.
+        from app.services import telegram_event_listener
+
         try:
-            async with _TELETHON_LOCK:
+            live = telegram_event_listener.active_client()
+            if live is not None:
                 return await asyncio.wait_for(
-                    self._do_fetch(db, source, limit),
+                    self._do_fetch(db, source, limit, client=live),
                     timeout=90,
                 )
+            # Таймаут снаружи лока, а не внутри: слушатель держит лок всё время,
+            # пока подключён, и ожидание здесь иначе было бы неограниченным —
+            # опрос завис бы вместе со всем планировщиком.
+            return await asyncio.wait_for(
+                self._fetch_with_own_client(db, source, limit),
+                timeout=90,
+            )
         except asyncio.TimeoutError:
             raise RuntimeError(
                 f"Timeout при подключении к Telegram для @{source.username}. "
@@ -101,9 +115,15 @@ class TelegramReaderService:
                 "заново в админке."
             )
 
-    async def _do_fetch(self, db: Session, source: SourceChannel, limit: int) -> int:
-        client = self._client()
-        await client.connect()
+    async def _fetch_with_own_client(self, db: Session, source: SourceChannel, limit: int) -> int:
+        async with _TELETHON_LOCK:
+            return await self._do_fetch(db, source, limit)
+
+    async def _do_fetch(self, db: Session, source: SourceChannel, limit: int, client=None) -> int:
+        own_client = client is None
+        if own_client:
+            client = self._client()
+            await client.connect()
         try:
             if not await client.is_user_authorized():
                 raise RuntimeError(
@@ -120,7 +140,8 @@ class TelegramReaderService:
 
             pending, last_msg_id = await self._collect_pending(client, db, source, limit)
         finally:
-            await client.disconnect()
+            if own_client:
+                await client.disconnect()
 
         return self._flush_pending(db, source, pending, last_msg_id)
 
@@ -241,11 +262,15 @@ class TelegramReaderService:
                 timeout=180,
             )
 
+        return await asyncio.wait_for(
+            self._restore_with_own_client(db, source, raw_post, missing),
+            timeout=180,
+        )
+
+    async def _restore_with_own_client(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list) -> int:
+        # Как и в fetch_source: ждать лок под общим таймаутом, а не бесконечно.
         async with _TELETHON_LOCK:
-            return await asyncio.wait_for(
-                self._do_restore_media(db, source, raw_post, missing, None),
-                timeout=180,
-            )
+            return await self._do_restore_media(db, source, raw_post, missing, None)
 
     async def _do_restore_media(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list, client) -> int:
         own_client = client is None

@@ -18,6 +18,11 @@ _MAX_RETRY_ATTEMPTS = 3
 _JOB_ID = "main_pipeline"
 # Чистить журнал на каждом прогоне (раз в две минуты) незачем — это скан таблицы.
 _PRUNE_INTERVAL = timedelta(hours=1)
+# Как часто опрашивать каналы, когда слушатель на связи. Слушатель может считать
+# себя живым и при этом не получать обновления — например, по каналу, на который
+# аккаунт не подписан. Опрос здесь не режим работы, а страховка: он ловит то,
+# что слушатель проспал, и не даёт сбору встать молча.
+_SAFETY_FETCH_INTERVAL = timedelta(minutes=10)
 
 
 class SchedulerService:
@@ -32,6 +37,8 @@ class SchedulerService:
         self.is_running: bool = False
         self._last_draft_notified: int = 0
         self._last_prune_at: datetime | None = None
+        self._last_fetch_at: datetime | None = None
+        self.last_run_error: str | None = None
 
     @property
     def next_run_at(self) -> datetime | None:
@@ -100,18 +107,40 @@ class SchedulerService:
         elif count < threshold:
             self._last_draft_notified = 0
 
-    async def _safe_run(self):
+    def _should_fetch(self, force: bool) -> bool:
+        """Опрашивать ли каналы на этом прогоне.
+
+        Раньше здесь стоял флаг is_started, который поднимался при запуске
+        слушателя и не опускался уже никогда. Слушатель мог не подключиться ни
+        разу — опрос всё равно оставался выключен, и сбор вставал насовсем без
+        единой записи в журнале. Теперь опрос безопасен в любой момент: он
+        работает клиентом слушателя, если тот на связи, и берёт общий лок, если
+        поднимает свой.
+        """
+        if force or self.listener is None or not self.listener.is_active:
+            return True
+        if self._last_fetch_at is None:
+            return True
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        return now - self._last_fetch_at >= _SAFETY_FETCH_INTERVAL
+
+    async def _safe_run(self, force_fetch: bool = False) -> int | None:
+        """Возвращает число собранных постов, либо None если прогон уже идёт.
+
+        Кнопка «Собрать сейчас» раньше молча возвращала на дашборд в обоих
+        случаях — и когда собрала, и когда не делала вообще ничего.
+        """
+        fetched = 0
         if not self._lock.locked():
             async with self._lock:
                 self.is_running = True
                 self.last_run_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                self.last_run_error = None
                 with SessionLocal() as db:
                     try:
-                        # Если listener стартовал — никогда не создаём конкурирующий
-                        # Telethon-клиент, даже во время паузы переподключения (30с).
-                        skip_fetch = bool(self.listener and (
-                            self.listener.is_active or getattr(self.listener, "is_started", False)
-                        ))
+                        skip_fetch = not self._should_fetch(force_fetch)
+                        if not skip_fetch:
+                            self._last_fetch_at = self.last_run_at
                         before_total = db.scalar(select(func.count()).select_from(RawPost)) or 0
 
                         await self.pipeline.run_once(db, skip_fetch=skip_fetch)
@@ -136,6 +165,9 @@ class SchedulerService:
                         db.commit()
                         self._prune_if_due(db)
                     except Exception as exc:
+                        # Кнопка «Собрать сейчас» читает это, чтобы не отрапортовать
+                        # об успешном прогоне, который на самом деле упал.
+                        self.last_run_error = str(exc)[:300]
                         logger.exception("Scheduler run failed")
                         # Сессия может быть в PendingRollbackError после IntegrityError —
                         # откатываем перед любым дальнейшим использованием.
@@ -164,6 +196,8 @@ class SchedulerService:
                             logger.warning("Failed to record scheduler_error ActionLog", exc_info=True)
                     finally:
                         self.is_running = False
+            return fetched
+        return None
 
     def _prune_if_due(self, db):
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -176,8 +210,8 @@ class SchedulerService:
             logger.warning("Не удалось почистить журнал", exc_info=True)
             db.rollback()
 
-    async def trigger_run(self):
-        await self._safe_run()
+    async def trigger_run(self, force_fetch: bool = False) -> int | None:
+        return await self._safe_run(force_fetch=force_fetch)
 
     def update_interval(self, seconds: int):
         self.interval_seconds = seconds
