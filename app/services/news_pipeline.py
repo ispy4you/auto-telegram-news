@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,6 +13,9 @@ from app.services.telegram_reader import TelegramReaderService
 from app.services.telegram_publisher import TelegramPublisherService
 
 logger = logging.getLogger(__name__)
+
+# Как долго одна и та же ошибка сбора считается уже записанной.
+_FETCH_ERROR_QUIET_PERIOD = timedelta(hours=1)
 
 
 class NewsPipelineService:
@@ -35,10 +39,40 @@ class NewsPipelineService:
                     msg = msg[:500] + "… [truncated]"
                 try:
                     db.rollback()
-                    db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
-                    db.commit()
+                    self._record_fetch_error(db, source, msg)
                 except Exception:
                     logger.warning("Failed to record fetch_error ActionLog for source_id=%s", source.id, exc_info=True)
+
+    @staticmethod
+    def _record_fetch_error(db: Session, source: SourceChannel, msg: str) -> None:
+        """Одна и та же ошибка пишется не чаще раза в час.
+
+        Опрос идёт раз в две минуты: недоступный канал иначе давал бы 720
+        одинаковых строк в сутки, и журнал переставали бы читать — а он теперь
+        единственное место, где видно, что сбор сломан. Час выбран как компромисс:
+        подряд идущие повторы не мусорят, но если канал отвалился снова через
+        полдня, это отдельная запись, а не тишина.
+        """
+        last = db.scalars(
+            select(ActionLog)
+            .where(
+                ActionLog.action == "fetch_error",
+                ActionLog.entity_type == "SourceChannel",
+                ActionLog.entity_id == str(source.id),
+            )
+            .order_by(ActionLog.id.desc())
+            .limit(1)
+        ).first()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if (
+            last is not None
+            and last.message == msg
+            and last.created_at is not None
+            and now - last.created_at < _FETCH_ERROR_QUIET_PERIOD
+        ):
+            return
+        db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=msg))
+        db.commit()
 
     async def process_ready_posts(self, db: Session):
         posts = db.scalars(select(RawPost).where(RawPost.status.in_([RawPostStatus.NEW.value, RawPostStatus.READY.value]))).all()

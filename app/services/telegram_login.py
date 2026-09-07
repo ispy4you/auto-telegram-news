@@ -91,10 +91,13 @@ class TelegramLoginService:
         if not settings.telegram_api_id or not settings.telegram_api_hash:
             raise RuntimeError("TELEGRAM_API_ID и TELEGRAM_API_HASH не заданы в .env")
         if self._client is None:
+            # Слушателя останавливаем ДО взятия лока: пока он подключён, лок
+            # держит он сам — попытка занять лок первой заблокировала бы нас
+            # навсегда, так и не дойдя до stop().
+            await self._event_listener.stop()
             if not self._lock_acquired:
                 await _TELETHON_LOCK.acquire()
                 self._lock_acquired = True
-            await self._event_listener.stop()
             self._client = self._reader._client()
             await self._client.connect()
         return self._client
