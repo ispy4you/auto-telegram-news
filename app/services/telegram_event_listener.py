@@ -65,7 +65,8 @@ class TelegramEventListenerService:
         """Живой Telethon-клиент слушателя или None.
 
         Нужен всем, кому иначе пришлось бы поднимать второй клиент на той же
-        сессии: проект этого избегает намеренно, см. is_started.
+        сессии: проект этого избегает намеренно — см. _TELETHON_LOCK, который
+        слушатель держит всё время, пока подключён.
         """
         if self._client is not None and self._client.is_connected():
             return self._client
@@ -74,8 +75,11 @@ class TelegramEventListenerService:
     @property
     def is_started(self) -> bool:
         """True когда listener запущен (включая паузы переподключения).
-        Планировщик использует это чтобы НИКОГДА не создавать конкурирующий
-        Telethon-клиент пока event listener владеет файлом сессии."""
+
+        Планировщик на это больше не смотрит: флаг поднимается при запуске и не
+        опускается никогда, и опрос из-за него вставал насовсем. Осталось только
+        для карточки входа в админке — там это честный признак «служба живёт».
+        """
         return self._started
 
     async def start(self, db_factory) -> None:
