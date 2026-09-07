@@ -36,9 +36,11 @@ def prompt_pair(db_session):
 
 @pytest.fixture
 def target(db_session):
+    # project_id обязателен: страница каналов показывает только текущий проект,
+    # а канал без проекта в списке не появится.
     channel = TargetChannel(
         title="Канал", chat_id="-100500", enabled=True,
-        auto_publish_enabled=True, default_mode="auto",
+        auto_publish_enabled=True, default_mode="auto", project_id=1,
     )
     db_session.add(channel)
     db_session.commit()
