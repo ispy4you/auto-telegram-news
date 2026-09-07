@@ -297,3 +297,41 @@ def test_the_same_failure_after_the_quiet_period_is_written_again(db_session, so
 
     _record(db_session, source, "Сессия Telethon не авторизована")
     assert db_session.query(ActionLog).count() == 2
+
+
+def test_a_post_the_listener_saved_first_is_not_reported_as_a_failure(db_session, source, monkeypatch):
+    """Опрос и слушатель могут столкнуться на одном сообщении.
+
+    Уникальный индекс uq_source_message отобьёт вторую вставку — но это не
+    поломка сбора, и в журнал такое попадать не должно: иначе оператор увидит
+    «ошибка» там, где всё в порядке.
+    """
+    from sqlalchemy.exc import IntegrityError
+
+    from app.services.news_pipeline import NewsPipelineService
+
+    pipeline = NewsPipelineService()
+
+    async def _collide(db, src, limit=None):
+        raise IntegrityError("INSERT", {}, Exception("uq_source_message"))
+
+    monkeypatch.setattr(pipeline.reader, "fetch_source", _collide)
+    asyncio.run(pipeline.fetch_new_posts(db_session))
+
+    assert db_session.query(ActionLog).count() == 0
+
+
+def test_a_real_failure_is_still_reported(db_session, source, monkeypatch):
+    from app.services.news_pipeline import NewsPipelineService
+
+    pipeline = NewsPipelineService()
+
+    async def _fail(db, src, limit=None):
+        raise RuntimeError("Сессия Telethon не авторизована")
+
+    monkeypatch.setattr(pipeline.reader, "fetch_source", _fail)
+    asyncio.run(pipeline.fetch_new_posts(db_session))
+
+    entry = db_session.query(ActionLog).one()
+    assert entry.action == "fetch_error"
+    assert "не авторизована" in entry.message

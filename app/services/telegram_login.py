@@ -96,7 +96,15 @@ class TelegramLoginService:
             # навсегда, так и не дойдя до stop().
             await self._event_listener.stop()
             if not self._lock_acquired:
-                await _TELETHON_LOCK.acquire()
+                # Ожидание с потолком: это обработчик запроса, и подвесить его
+                # навсегда нельзя, даже если остановка слушателя не уложилась
+                # в свой таймаут.
+                try:
+                    await asyncio.wait_for(_TELETHON_LOCK.acquire(), timeout=15)
+                except asyncio.TimeoutError:
+                    raise RuntimeError(
+                        "Telegram занят фоновым сбором. Подождите полминуты и попробуйте снова."
+                    )
                 self._lock_acquired = True
             self._client = self._reader._client()
             await self._client.connect()

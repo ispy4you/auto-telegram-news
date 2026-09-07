@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -31,6 +32,13 @@ class NewsPipelineService:
         for source in sources:
             try:
                 await self.reader.fetch_source(db, source)
+            except IntegrityError:
+                # Слушатель успел записать тот же пост между проверкой на дубль
+                # и вставкой (uq_source_message). Это не поломка сбора: пост уже
+                # в базе, остальные приедут на следующем прогоне — last_message_id
+                # не сдвинулся. Оператору такое показывать незачем.
+                db.rollback()
+                logger.debug("Пост из @%s уже записан слушателем", source.username)
             except Exception as exc:
                 msg = str(exc)
                 if "Constructor ID" in msg and "TLObject" in msg:
