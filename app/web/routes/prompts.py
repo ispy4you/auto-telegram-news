@@ -143,8 +143,9 @@ async def delete_prompt(prompt_id: int, db: Session = Depends(get_db), _: bool =
 
     was_default = prompt.is_default
     name = prompt.name
-    # Каналы, которые на него ссылались, вернутся к основному. Без этого
-    # внешний ключ не дал бы удалить промпт вовсе.
+    # Каналы, которые на него ссылались, вернутся к основному. Формально
+    # генерация переживёт и висячую ссылку, но в интерфейсе канала осталось бы
+    # пустое место вместо имени промпта.
     for target in db.scalars(select(TargetChannel).where(TargetChannel.prompt_id == prompt.id)).all():
         target.prompt_id = None
     db.flush()

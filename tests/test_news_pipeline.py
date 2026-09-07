@@ -31,7 +31,7 @@ def ready_post(db_session, source):
 def _pipeline_with_ai(result: AiResult) -> NewsPipelineService:
     pipeline = NewsPipelineService()
 
-    async def _generate(_post, _db=None):
+    async def _generate(_post, _db=None, rules=None):
         return result
 
     pipeline.ai_client.generate_news_post = _generate

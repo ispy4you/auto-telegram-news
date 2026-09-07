@@ -209,7 +209,7 @@ def test_unbinding_returns_the_channel_to_the_default(logged_in, csrf, db_sessio
 
 
 def test_deleting_a_bound_prompt_frees_the_channel(logged_in, csrf, db_session, target, prompt_pair):
-    """Иначе внешний ключ не дал бы удалить промпт вовсе."""
+    """Иначе в интерфейсе канала осталась бы ссылка в никуда."""
     _, health = prompt_pair
     target.prompt_id = health.id
     db_session.commit()
