@@ -39,10 +39,16 @@ def _answer(text="Готовый пост", **kwargs):
     return AsyncMock(return_value=AiResult(**defaults))
 
 
-def test_the_button_is_offered_next_to_the_prompt(logged_in):
-    page = logged_in.get("/settings").text
+def test_the_button_is_offered_next_to_the_prompt(logged_in, db_session):
+    from app.models import Prompt
 
-    assert 'name="ai_prompt"' in page
+    prompt = Prompt(name="Основной", body="Пиши коротко.", is_default=True)
+    db_session.add(prompt)
+    db_session.commit()
+
+    page = logged_in.get(f"/prompts/{prompt.id}").text
+
+    assert 'name="body"' in page
     assert "prompt-check" in page
     assert 'name="ai_prompt_template"' not in page, "второе поле промпта убрали"
 
@@ -67,13 +73,13 @@ def test_preview_takes_the_freshest_post_and_can_move_to_the_next(logged_in, csr
     assert second["post"]["excerpt"] == "Старая новость"
 
 
-def test_preview_saves_neither_the_setting_nor_the_post(logged_in, csrf, two_posts, db_session):
+def test_preview_saves_neither_the_prompt_nor_the_post(logged_in, csrf, two_posts, db_session):
     with patch("app.services.ai_gateway.AiGatewayClient.generate_news_post", _answer()):
         _check(logged_in, csrf, prompt="Пиши стихами.")
 
-    from app.services import settings_registry
+    from app.models import Prompt
     assert db_session.scalars(select(GeneratedPost)).all() == []
-    assert settings_registry.get("ai_prompt", db_session) != "Пиши стихами."
+    assert db_session.scalars(select(Prompt)).all() == [], "проверка не заводит промптов"
     assert db_session.scalar(select(ActionLog).where(ActionLog.action == "prompt_preview")) is not None
 
 

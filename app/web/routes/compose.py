@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ActionLog
-from app.services import manual_post
+from app.services import manual_post, prompts
 from app.services.ai_gateway import AiGatewayClient
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, tpl
@@ -26,10 +26,19 @@ MIN_TEXT_LEN = 10
 MAX_TEXT_LEN = 20000
 
 
-def _page(request: Request, db: Session, text: str = "", error: str | None = None, refusal: str | None = None):
+def _page(
+    request: Request,
+    db: Session,
+    text: str = "",
+    error: str | None = None,
+    refusal: str | None = None,
+    prompt_id: int | None = None,
+):
     return tpl(request, "compose.html", db, {
         "text": text, "error": error, "refusal": refusal,
         "manual_source_title": manual_post.SOURCE_TITLE,
+        "prompts": prompts.all_prompts(db),
+        "selected_prompt_id": prompt_id,
     })
 
 
@@ -42,30 +51,32 @@ def compose_page(request: Request, db: Session = Depends(get_db), _: bool = Depe
 async def compose_generate(
     request: Request,
     source_text: str = Form(""),
+    prompt_id: int | None = Form(None),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
     text = (source_text or "").strip()
     if len(text) < MIN_TEXT_LEN:
-        return _page(request, db, text, error=f"Слишком короткий текст: нужно хотя бы {MIN_TEXT_LEN} символов.")
+        return _page(request, db, text, error=f"Слишком короткий текст: нужно хотя бы {MIN_TEXT_LEN} символов.", prompt_id=prompt_id)
     if len(text) > MAX_TEXT_LEN:
         return _page(request, db, text, error=(
             f"Слишком длинный текст: {len(text)} символов при пределе {MAX_TEXT_LEN}. "
             f"Оставьте саму новость, без всего остального."
-        ))
+        ), prompt_id=prompt_id)
 
-    result = await AiGatewayClient().generate(manual_post.prompt_values(text), db)
+    rules = prompts.rules_for(db, prompt_id) if prompt_id else None
+    result = await AiGatewayClient().generate(manual_post.prompt_values(text), db, rules=rules)
 
     # Текст всегда возвращается в поле: он набран руками, и терять его при
     # любой осечке — худшее, что может сделать эта страница.
     if result.failed:
         db.add(ActionLog(action="ai_error", entity_type="Compose", entity_id="manual", message=result.reason[:500]))
         db.commit()
-        return _page(request, db, text, error=result.reason)
+        return _page(request, db, text, error=result.reason, prompt_id=prompt_id)
 
     if not result.suitable or not result.text.strip():
         reason = result.reason.strip() or "Модель не вернула текст поста."
-        return _page(request, db, text, refusal=reason)
+        return _page(request, db, text, refusal=reason, prompt_id=prompt_id)
 
     post = manual_post.create(
         db,

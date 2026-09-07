@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
-from app.services import ai_prompt, embedder, prompt_template, settings_registry
+from app.services import embedder, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import get_display_timezone
 from app.web.auth import require_auth
@@ -50,11 +50,6 @@ def settings_page(
     return tpl(request, "settings.html", db, {
         "cfg": cfg,
         "env": env,
-        "default_prompt": settings_registry.default("ai_prompt"),
-        # Скрытую часть промпта показываем целиком: описания словами мало,
-        # пока не видно, что именно уходит в модель помимо правил.
-        "auto_appendix": ai_prompt.appendix_example(),
-        "response_contract": ai_prompt.RESPONSE_CONTRACT,
         "media_size_mb": media_stats["size_mb"],
         "media_stats": media_stats,
         "ok": ok,
@@ -101,10 +96,6 @@ async def settings_save(
 
     settings_registry.store(db, values)
 
-    # Промпт больше не может уронить генерацию, но опечатка в плейсхолдере
-    # молча оставит модель без данных — поэтому говорим о ней сразу.
-    warnings = prompt_template.problems(values["ai_prompt"]) if "ai_prompt" in values else []
-
     if "fetch_interval_seconds" in values:
         sched = getattr(request.app.state, "scheduler", None)
         if sched:
@@ -113,11 +104,7 @@ async def settings_save(
             except Exception as exc:
                 logger.warning("Could not update scheduler interval: %s", exc)
 
-    if warnings:
-        return RedirectResponse(
-            url="/settings?warn=" + urllib.parse.quote(" ".join(warnings)[:600]),
-            status_code=302,
-        )
+    # Предупреждения о плейсхолдерах уехали вместе с промптом на /prompts.
     return RedirectResponse(url="/settings", status_code=302)
 
 

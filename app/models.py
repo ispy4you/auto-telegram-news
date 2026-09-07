@@ -206,6 +206,25 @@ class PublishJob(Base):
     generated_post = relationship("GeneratedPost", back_populates="publish_jobs")
 
 
+class Prompt(Base):
+    """Именованные правила генерации.
+
+    Раньше правила были одной настройкой на всю панель. Каналы пишут по-разному:
+    у новостной ленты и у канала про здоровье разный тон, длина и запреты — один
+    текст на всех заставлял править настройку перед каждой генерацией.
+    """
+
+    __tablename__ = "prompts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(120))
+    body: Mapped[str] = mapped_column(Text)
+    #: с каким промптом генерация начинается, если ничего не выбрано
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

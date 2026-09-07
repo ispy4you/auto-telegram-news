@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, MediaItem, MediaOrigin, RawPost, RawPostStatus, SourceChannel, TargetChannel
-from app.services import media_restore, media_storage, post_lifecycle
+from app.services import media_restore, media_storage, post_lifecycle, prompts
 from app.services.ai_gateway import AiGatewayClient, AiResult, GenerationFailed
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
@@ -73,14 +73,17 @@ def posts(
     })
 
 
-async def _request_generation(post: RawPost, db: Session) -> AiResult:
+async def _request_generation(post: RawPost, db: Session, prompt_id: int | None = None) -> AiResult:
     """Спрашивает модель и отделяет отказ редактора от поломки.
 
     Техническую ошибку — недоступный шлюз, сломанный шаблон промпта — поднимаем
     наверх и пост не трогаем: раньше такая ошибка отклоняла новость навсегда,
     хотя после починки причины её достаточно сгенерировать заново.
     """
-    result = await AiGatewayClient().generate_news_post(post, db)
+    # Без выбора промпт не подставляем: шлюз сам возьмёт основной. Так «ничего
+    # не выбрали» остаётся одним состоянием, а не двумя одинаковыми на вид.
+    rules = prompts.rules_for(db, prompt_id) if prompt_id else None
+    result = await AiGatewayClient().generate_news_post(post, db, rules=rules)
     if result.failed:
         db.add(ActionLog(action="ai_error", entity_type="RawPost", entity_id=str(post.id), message=result.reason[:500]))
         db.commit()
@@ -113,8 +116,8 @@ def _save_generation(post: RawPost, result: AiResult, db: Session) -> None:
     db.commit()
 
 
-async def _generate_single_post(post: RawPost, db: Session) -> None:
-    _save_generation(post, await _request_generation(post, db), db)
+async def _generate_single_post(post: RawPost, db: Session, prompt_id: int | None = None) -> None:
+    _save_generation(post, await _request_generation(post, db, prompt_id), db)
 
 
 async def _bulk_generate_task(ids: list[int]) -> None:
@@ -198,6 +201,7 @@ def post_detail(
         "post": post, "targets": targets, "err": err, "media_err": media_err,
         "missing_media": missing_media, "lost_media": lost_media,
         "media_limit": media_storage.MAX_ITEMS_PER_POST,
+        "prompts": prompts.all_prompts(db),
     })
 
 
@@ -354,11 +358,11 @@ def move_post_media(
     return _back_to_post(post_id)
 
 
-async def _do_generate(post_id: int, db: Session) -> None:
+async def _do_generate(post_id: int, db: Session, prompt_id: int | None = None) -> None:
     post = db.get(RawPost, post_id)
     if not post:
         return
-    await _generate_single_post(post, db)
+    await _generate_single_post(post, db, prompt_id)
 
 
 def _back_to_post(post_id: int, error: str | None = None, media_error: str | None = None) -> RedirectResponse:
@@ -375,9 +379,14 @@ def _back_to_post(post_id: int, error: str | None = None, media_error: str | Non
 
 
 @router.post("/posts/{post_id}/generate")
-async def generate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+async def generate_post(
+    post_id: int,
+    prompt_id: int | None = Form(None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
     try:
-        await _do_generate(post_id, db)
+        await _do_generate(post_id, db, prompt_id)
     except GenerationFailed as exc:
         return _back_to_post(post_id, str(exc))
     return _back_to_post(post_id)
@@ -401,7 +410,12 @@ def edit_draft(post_id: int, db: Session = Depends(get_db), _: bool = Depends(re
 
 
 @router.post("/posts/{post_id}/regenerate")
-async def regenerate_post(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+async def regenerate_post(
+    post_id: int,
+    prompt_id: int | None = Form(None),
+    db: Session = Depends(get_db),
+    _: bool = Depends(require_auth),
+):
     post = db.get(RawPost, post_id)
     if not post:
         return RedirectResponse(url="/posts", status_code=302)
@@ -409,7 +423,7 @@ async def regenerate_post(post_id: int, db: Session = Depends(get_db), _: bool =
     # Сначала новый текст, потом отказ от старого: иначе сорвавшаяся генерация
     # оставляла пост вообще без черновика.
     try:
-        result = await _request_generation(post, db)
+        result = await _request_generation(post, db, prompt_id)
     except GenerationFailed as exc:
         return _back_to_post(post_id, str(exc))
 
