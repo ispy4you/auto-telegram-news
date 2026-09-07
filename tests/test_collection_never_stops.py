@@ -402,7 +402,7 @@ class _CollidingReader:
     async def _collect_pending(self, client, db, src, limit=50):
         return [], None, 0
 
-    def _flush_pending(self, db, src, pending, last_msg_id):
+    def _flush_pending(self, db, src, pending, last_msg_id, skipped_old=0):
         from sqlalchemy.exc import IntegrityError
 
         raise IntegrityError("INSERT", {}, Exception("uq_source_message"))
