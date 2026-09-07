@@ -181,6 +181,29 @@ def test_a_change_of_state_is_written(listener, db_session):
     assert db_session.query(ActionLog).count() == 2
 
 
+def test_a_flapping_connection_does_not_flood_the_journal(listener, db_session):
+    """Мигающее соединение чередует «подключён» и «отключён».
+
+    Проверки «отличается ли от предыдущего» здесь мало: каждая строка отличается
+    от соседней, и за сутки набежало бы больше пяти тысяч записей.
+    """
+    for _ in range(20):
+        listener._note("listener_connected", "Слушатель Telegram подключён, каналов в мониторинге: 2.")
+        listener._note("listener_disconnected", "Соединение с Telegram закрыто, переподключаемся.")
+
+    assert db_session.query(ActionLog).count() == 2
+
+
+def test_the_same_state_an_hour_later_is_written_again(listener, db_session):
+    """Час спустя это уже новость, а не повтор."""
+    message = "Слушатель Telegram отключён: нет сети"
+    listener._note("listener_error", message)
+    listener._noted_at[message] = _now() - timedelta(hours=2)
+    listener._note("listener_error", message)
+
+    assert db_session.query(ActionLog).count() == 2
+
+
 def test_a_broken_journal_does_not_take_the_listener_down(listener, db_session):
     """Запись в журнал — не повод уронить сбор."""
     def _explode():
@@ -335,3 +358,34 @@ def test_a_real_failure_is_still_reported(db_session, source, monkeypatch):
     entry = db_session.query(ActionLog).one()
     assert entry.action == "fetch_error"
     assert "не авторизована" in entry.message
+
+
+def test_starting_the_listener_twice_leaves_one_loop(listener):
+    """Два выхода из аккаунта подряд не должны оставить вторую петлю.
+
+    Она подняла бы второй Telethon-клиент на той же сессии, а с общим локом
+    просто повисла бы в ожидании и всплыла при следующей остановке.
+    """
+    async def _scenario():
+        started = []
+
+        async def _fake_loop():
+            started.append(1)
+            await asyncio.sleep(3600)
+
+        listener._run_loop = _fake_loop
+        await listener.start(listener._db_factory)
+        first = listener._task
+        await asyncio.sleep(0)  # даём первой петле дойти до своего await
+        await listener.start(listener._db_factory)
+        second = listener._task
+
+        try:
+            assert first is not second
+            assert first.done()          # старую петлю остановили
+            assert not second.done()     # новая работает
+            assert started == [1, 1]
+        finally:
+            await listener.stop()
+
+    asyncio.run(_scenario())

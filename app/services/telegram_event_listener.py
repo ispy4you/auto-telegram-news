@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 
 _RECONNECT_DELAY = 30  # секунд между попытками переподключения
 _SOURCE_RELOAD_INTERVAL = 300  # секунд между обновлением списка каналов
+# Как долго одно и то же состояние считается уже записанным в журнал.
+_NOTE_QUIET_PERIOD = timedelta(hours=1)
 
 
 _ACTIVE_LISTENER = None
@@ -42,7 +44,7 @@ class TelegramEventListenerService:
         # Буфер для альбомов (grouped_id -> list of (username, msg))
         self._album_buffer: dict[int, list] = defaultdict(list)
         self._album_tasks: dict[int, asyncio.Task] = {}
-        self._last_note: str | None = None  # чтобы не писать одно и то же в журнал
+        self._noted_at: dict[str, datetime] = {}  # сообщение -> когда записали
 
     @property
     def is_active(self) -> bool:
@@ -76,6 +78,13 @@ class TelegramEventListenerService:
         return self._started
 
     async def start(self, db_factory) -> None:
+        if self._task is not None and not self._task.done():
+            # Повторный start() без stop() — например, два подряд выхода из
+            # аккаунта в админке. Вторая петля подняла бы второй Telethon-клиент
+            # на той же сессии, а с общим локом просто повисла бы навсегда,
+            # дожидаясь своей очереди, и всплыла бы при следующей остановке.
+            logger.warning("Event listener уже запущен — перезапускаем")
+            await self.stop()
         self._db_factory = db_factory
         self._started = True
         self._task = asyncio.create_task(self._run_loop(), name="tg-event-listener")
@@ -120,10 +129,16 @@ class TelegramEventListenerService:
         строки тонут в логе health-чеков. Оператор видел «постов нет» и не мог
         отличить тишину в каналах от мёртвого соединения.
 
-        Повтор того же сообщения не пишем: цикл переподключения раз в 30 секунд
-        иначе засыпал бы журнал одинаковыми строками.
+        Одно и то же состояние пишем не чаще раза в час. Проверять «отличается ли
+        от предыдущего» недостаточно: соединение может мигать, и тогда «подключён»
+        и «отключён» чередуются — каждое отличается от предыдущего, и за сутки
+        получилось бы больше пяти тысяч строк.
         """
-        if message == self._last_note or not self._db_factory:
+        if not self._db_factory:
+            return
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        written_at = self._noted_at.get(message)
+        if written_at is not None and now - written_at < _NOTE_QUIET_PERIOD:
             return
         try:
             with self._db_factory() as db:
@@ -139,7 +154,10 @@ class TelegramEventListenerService:
             # навсегда спрятала бы эту строку из журнала.
             logger.warning("Не удалось записать состояние слушателя в журнал", exc_info=True)
             return
-        self._last_note = message
+        if len(self._noted_at) > 50:
+            # Текст ошибки попадает в ключ, так что словарь в теории может расти.
+            self._noted_at.clear()
+        self._noted_at[message] = now
 
     async def _run_loop(self) -> None:
         from app.services.telegram_reader import TelegramReaderService
