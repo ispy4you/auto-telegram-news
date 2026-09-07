@@ -400,7 +400,7 @@ class _CollidingReader:
     """Догон падает на уникальном индексе: тот же пост уже записал опрос."""
 
     async def _collect_pending(self, client, db, src, limit=50):
-        return [], None
+        return [], None, 0
 
     def _flush_pending(self, db, src, pending, last_msg_id):
         from sqlalchemy.exc import IntegrityError
