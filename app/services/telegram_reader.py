@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # чтобы фоновый слушатель, опрос и вход в админке не толкались за одну сессию.
 _TELETHON_LOCK = asyncio.Lock()
 
+#: Как часто источник сообщает в журнал, что отбрасывает посты по возрасту.
+_SKIPPED_QUIET_PERIOD = timedelta(hours=1)
+
 
 class TelegramReaderService:
     def __init__(self):
@@ -138,12 +141,12 @@ class TelegramReaderService:
                     "пользовательским аккаунтом — войдите заново в админке."
                 )
 
-            pending, last_msg_id = await self._collect_pending(client, db, source, limit)
+            pending, last_msg_id, skipped_old = await self._collect_pending(client, db, source, limit)
         finally:
             if own_client:
                 await client.disconnect()
 
-        return self._flush_pending(db, source, pending, last_msg_id)
+        return self._flush_pending(db, source, pending, last_msg_id, skipped_old)
 
     @staticmethod
     def _max_post_age_cutoff(db: Session) -> datetime | None:
@@ -156,19 +159,32 @@ class TelegramReaderService:
 
     async def _collect_pending(
         self, client: TelegramClient, db: Session, source: SourceChannel, limit: int
-    ) -> tuple[list[dict], int | None]:
-        """Фаза 1: собирает сообщения и скачивает медиа. Клиент должен быть подключён."""
+    ) -> tuple[list[dict], int | None, int]:
+        """Фаза 1: собирает сообщения и скачивает медиа. Клиент должен быть подключён.
+
+        Третьим значением — сколько постов отброшено по возрасту: дырка в ленте
+        должна быть объяснимой, а не выглядеть пропажей.
+        """
         albums: dict[int, list] = defaultdict(list)
         standalone_messages = []
 
         entity = await client.get_entity(source.username)
         if source.last_message_id:
-            fetch_kwargs: dict = {"limit": limit, "min_id": source.last_message_id}
+            # reverse=True — берём самые СТАРЫЕ из непрочитанных, а не самые
+            # свежие. Разница видна после простоя: если за это время вышло
+            # больше limit постов, при выборке «сверху» last_message_id
+            # прыгал на самый новый, и всё, что между, пропадало навсегда и
+            # молча. Теперь очередь разбирается с начала, за несколько прогонов.
+            fetch_kwargs: dict = {"limit": limit, "min_id": source.last_message_id, "reverse": True}
+            ascending = True
         else:
+            # Первый сбор: нужны последние пять, а не пять от сотворения канала.
             fetch_kwargs = {"limit": 5}
+            ascending = False
 
         messages = [m async for m in client.iter_messages(entity, **fetch_kwargs)]
-        messages = list(reversed(messages))
+        if not ascending:
+            messages = list(reversed(messages))
 
         for msg in messages:
             if not msg:
@@ -203,13 +219,18 @@ class TelegramReaderService:
             pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
 
         if skipped_old:
-            logger.debug("Пропущено %d старых постов (старше отсечки) у @%s", skipped_old, source.username)
+            logger.info("Пропущено %d старых постов (старше отсечки) у @%s", skipped_old, source.username)
 
         last_msg_id = max((m.id for m in messages), default=None)
-        return pending, last_msg_id
+        return pending, last_msg_id, skipped_old
 
     def _flush_pending(
-        self, db: Session, source: SourceChannel, pending: list[dict], last_msg_id: int | None
+        self,
+        db: Session,
+        source: SourceChannel,
+        pending: list[dict],
+        last_msg_id: int | None,
+        skipped_old: int = 0,
     ) -> int:
         """Фаза 2: записывает накопленные посты в DB."""
         new_count = 0
@@ -230,8 +251,46 @@ class TelegramReaderService:
                 entity_id=str(source.id),
                 message=f"Собрано {new_count} новых постов из @{source.username}",
             ))
+        if skipped_old:
+            self._note_skipped_old(db, source, skipped_old)
         db.commit()
         return new_count
+
+    @staticmethod
+    def _note_skipped_old(db: Session, source: SourceChannel, skipped_old: int) -> None:
+        """Сказать в журнал, что часть постов отброшена по возрасту.
+
+        Раньше об этом знал только logger.debug, который на уровне INFO не
+        печатается: поста нет в ленте, а объяснения нет нигде.
+
+        Не чаще раза в час на источник. После долгого простоя очередь разбирается
+        пачками по limit штук, и каждая пачка целиком уходит за отсечку — без
+        окна тишины оператор получил бы десяток почти одинаковых строк подряд,
+        то есть ровно тот журнал, который перестают читать.
+        """
+        recent = db.scalars(
+            select(ActionLog)
+            .where(
+                ActionLog.action == "fetch_skipped_old",
+                ActionLog.entity_type == "SourceChannel",
+                ActionLog.entity_id == str(source.id),
+                ActionLog.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _SKIPPED_QUIET_PERIOD,
+            )
+            .limit(1)
+        ).first()
+        if recent is not None:
+            return
+
+        hours = settings_registry.get("max_post_age_hours", db)
+        db.add(ActionLog(
+            action="fetch_skipped_old",
+            entity_type="SourceChannel",
+            entity_id=str(source.id),
+            message=(
+                f"@{source.username}: пропущено {skipped_old} постов старше "
+                f"{hours:g} ч. Отсечка — настройка «Макс. возраст поста»."
+            ),
+        ))
 
     async def restore_media(self, db: Session, raw_post: RawPost) -> int:
         """Перекачивает медиа поста из исходного канала, если файлов нет на диске.
