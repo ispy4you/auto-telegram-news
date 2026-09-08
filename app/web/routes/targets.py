@@ -93,7 +93,12 @@ def update_target_prompt(
     if target is None:
         return RedirectResponse(url="/targets?error=Канал+не+найден", status_code=302)
 
-    chosen = db.get(Prompt, int(prompt_id)) if prompt_id else None
+    # prompt_id приходит из select, но POST можно собрать и руками: нечисловое
+    # значение не должно превращаться в пятисотую страницу.
+    try:
+        chosen = db.get(Prompt, int(prompt_id)) if prompt_id else None
+    except ValueError:
+        return RedirectResponse(url="/targets?error=Неизвестный+промпт", status_code=302)
     target.prompt_id = chosen.id if chosen else None
     db.add(ActionLog(
         action="target_prompt_update",
