@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 # чтобы фоновый слушатель, опрос и вход в админке не толкались за одну сессию.
 _TELETHON_LOCK = asyncio.Lock()
 
+#: Как часто источник сообщает в журнал, что отбрасывает посты по возрасту.
+_SKIPPED_QUIET_PERIOD = timedelta(hours=1)
+
 
 class TelegramReaderService:
     def __init__(self):
@@ -249,21 +252,45 @@ class TelegramReaderService:
                 message=f"Собрано {new_count} новых постов из @{source.username}",
             ))
         if skipped_old:
-            # Раньше об этом знал только logger.debug, который на уровне INFO
-            # не печатается. Пост, которого нет в ленте, выглядел пропажей —
-            # хотя его сознательно отбросили по возрасту.
-            hours = settings_registry.get("max_post_age_hours", db)
-            db.add(ActionLog(
-                action="fetch_skipped_old",
-                entity_type="SourceChannel",
-                entity_id=str(source.id),
-                message=(
-                    f"@{source.username}: пропущено {skipped_old} постов старше "
-                    f"{hours:g} ч. Отсечка — настройка «Макс. возраст поста»."
-                ),
-            ))
+            self._note_skipped_old(db, source, skipped_old)
         db.commit()
         return new_count
+
+    @staticmethod
+    def _note_skipped_old(db: Session, source: SourceChannel, skipped_old: int) -> None:
+        """Сказать в журнал, что часть постов отброшена по возрасту.
+
+        Раньше об этом знал только logger.debug, который на уровне INFO не
+        печатается: поста нет в ленте, а объяснения нет нигде.
+
+        Не чаще раза в час на источник. После долгого простоя очередь разбирается
+        пачками по limit штук, и каждая пачка целиком уходит за отсечку — без
+        окна тишины оператор получил бы десяток почти одинаковых строк подряд,
+        то есть ровно тот журнал, который перестают читать.
+        """
+        recent = db.scalars(
+            select(ActionLog)
+            .where(
+                ActionLog.action == "fetch_skipped_old",
+                ActionLog.entity_type == "SourceChannel",
+                ActionLog.entity_id == str(source.id),
+                ActionLog.created_at >= datetime.now(timezone.utc).replace(tzinfo=None) - _SKIPPED_QUIET_PERIOD,
+            )
+            .limit(1)
+        ).first()
+        if recent is not None:
+            return
+
+        hours = settings_registry.get("max_post_age_hours", db)
+        db.add(ActionLog(
+            action="fetch_skipped_old",
+            entity_type="SourceChannel",
+            entity_id=str(source.id),
+            message=(
+                f"@{source.username}: пропущено {skipped_old} постов старше "
+                f"{hours:g} ч. Отсечка — настройка «Макс. возраст поста»."
+            ),
+        ))
 
     async def restore_media(self, db: Session, raw_post: RawPost) -> int:
         """Перекачивает медиа поста из исходного канала, если файлов нет на диске.

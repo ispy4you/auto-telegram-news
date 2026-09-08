@@ -142,6 +142,46 @@ def test_the_journal_explains_the_gap(db_session, source):
     assert source.username in entry.message
 
 
+def test_the_gap_is_explained_once_an_hour(db_session, source):
+    """После долгого простоя очередь разбирается пачками, и каждая уходит за
+    отсечку целиком. Без окна тишины это десяток одинаковых строк подряд."""
+    settings_registry.store(db_session, {"max_post_age_hours": "24"})
+    reader = TelegramReaderService()
+
+    for _ in range(5):
+        reader._flush_pending(db_session, source, [], 42, skipped_old=50)
+
+    assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 1
+
+
+def test_an_hour_later_the_gap_is_mentioned_again(db_session, source):
+    settings_registry.store(db_session, {"max_post_age_hours": "24"})
+    reader = TelegramReaderService()
+
+    reader._flush_pending(db_session, source, [], 42, skipped_old=50)
+    stale = db_session.query(ActionLog).filter_by(action="fetch_skipped_old").one()
+    stale.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
+    db_session.commit()
+    reader._flush_pending(db_session, source, [], 43, skipped_old=50)
+
+    assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 2
+
+
+def test_another_source_is_not_silenced_by_the_first(db_session, source):
+    """Окно тишины — на источник, а не на всю панель."""
+    from app.models import SourceChannel
+
+    other = SourceChannel(title="Второй", username="second", url="https://t.me/second")
+    db_session.add(other)
+    db_session.commit()
+    reader = TelegramReaderService()
+
+    reader._flush_pending(db_session, source, [], 42, skipped_old=10)
+    reader._flush_pending(db_session, other, [], 42, skipped_old=10)
+
+    assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 2
+
+
 def test_nothing_is_written_when_nothing_was_dropped(db_session, source):
     reader = TelegramReaderService()
 
