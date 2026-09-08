@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.5.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.4.0...v1.5.0) (2026-09-08)
+
+
+### Features
+
+* источник, который снова отвечает, говорит об этом в журнал ([#45](https://github.com/ispy4you/auto-telegram-news/issues/45)) ([69a5854](https://github.com/ispy4you/auto-telegram-news/commit/69a585440e51d7a1b72f6133433544866ddfc3b5))
+* промпт перестал быть одной настройкой и стал списком ([#46](https://github.com/ispy4you/auto-telegram-news/issues/46)) ([f8e9117](https://github.com/ispy4you/auto-telegram-news/commit/f8e9117e408d1ae2657f9ec4c0f341cedded5856))
+* слишком большая картинка ужимается на загрузке ([#49](https://github.com/ispy4you/auto-telegram-news/issues/49)) ([13fa3a3](https://github.com/ispy4you/auto-telegram-news/commit/13fa3a3c0d340e2e5146089ac0d91728950aa13e))
+* у канала назначения появился промпт по умолчанию ([#50](https://github.com/ispy4you/auto-telegram-news/issues/50)) ([11d03ad](https://github.com/ispy4you/auto-telegram-news/commit/11d03adfb1ec0e9663de1c05286c90144392db9e))
+
+
+### Bug Fixes
+
+* webp переводим в JPEG, а отказ Telegram больше не страница 500 ([#42](https://github.com/ispy4you/auto-telegram-news/issues/42)) ([634f262](https://github.com/ispy4you/auto-telegram-news/commit/634f2625f3c825d1d22130d46e7b2eadd16da5d3))
+* автосбор больше не может встать молча ([#44](https://github.com/ispy4you/auto-telegram-news/issues/44)) ([f28d6f0](https://github.com/ispy4you/auto-telegram-news/commit/f28d6f003a1f9ed07290ee61b84ca7cc1b7b076c))
+* пропущенный пост либо приедет позже, либо будет объяснён ([#48](https://github.com/ispy4you/auto-telegram-news/issues/48)) ([18461e7](https://github.com/ispy4you/auto-telegram-news/commit/18461e725b556426055fc3ad4a5d64c1195f7eba))
+
 ## [1.4.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.3.0...v1.4.0) (2026-09-01)
 
 
