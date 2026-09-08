@@ -6,8 +6,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, SourceTargetRoute, TargetChannel
-from app.services import post_lifecycle, settings_registry
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel
+from app.services import post_lifecycle, post_routing, prompts, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
 from app.services.telegram_reader import TelegramReaderService
@@ -128,14 +128,7 @@ class NewsPipelineService:
         db.commit()
 
     def _resolve_targets(self, db: Session, raw_post: RawPost):
-        routes = db.execute(
-            select(SourceTargetRoute, TargetChannel)
-            .join(TargetChannel, SourceTargetRoute.target_channel_id == TargetChannel.id)
-            .where(SourceTargetRoute.source_id == raw_post.source_id, SourceTargetRoute.enabled.is_(True), TargetChannel.enabled.is_(True))
-        ).all()
-        if routes:
-            return [target for _, target in routes]
-        return db.scalars(select(TargetChannel).where(TargetChannel.enabled.is_(True))).all()
+        return post_routing.targets_for(db, raw_post)
 
     async def run_autopublish(self, db: Session):
         if not settings_registry.get("global_auto_publish_enabled", db):
@@ -149,7 +142,12 @@ class NewsPipelineService:
                 db.commit()
                 continue
 
-            result = await self.ai_client.generate_news_post(post, db)
+            # Промпт берётся у первого канала маршрута: выбирать здесь некому,
+            # а «основной» подходит не каждому каналу.
+            chosen = prompts.for_targets(db, targets)
+            result = await self.ai_client.generate_news_post(
+                post, db, rules=chosen.body if chosen else None,
+            )
             if result.failed:
                 # Техническая ошибка шлюза, а не редакционный отказ: пост остаётся
                 # READY и будет обработан на следующем прогоне. Остальные посты

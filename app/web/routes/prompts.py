@@ -9,10 +9,11 @@ import urllib.parse
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import ActionLog, Prompt
+from app.models import ActionLog, Prompt, TargetChannel
 from app.services import ai_prompt, prompt_template, prompts as prompts_service
 from app.web.auth import require_auth
 from app.web.routes.common import tpl
@@ -142,6 +143,12 @@ async def delete_prompt(prompt_id: int, db: Session = Depends(get_db), _: bool =
 
     was_default = prompt.is_default
     name = prompt.name
+    # Каналы, которые на него ссылались, вернутся к основному. Формально
+    # генерация переживёт и висячую ссылку, но в интерфейсе канала осталось бы
+    # пустое место вместо имени промпта.
+    for target in db.scalars(select(TargetChannel).where(TargetChannel.prompt_id == prompt.id)).all():
+        target.prompt_id = None
+    db.flush()
     db.delete(prompt)
     db.flush()
     if was_default:

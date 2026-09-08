@@ -202,6 +202,9 @@ def post_detail(
         "missing_media": missing_media, "lost_media": lost_media,
         "media_limit": media_storage.MAX_ITEMS_PER_POST,
         "prompts": prompts.all_prompts(db),
+        # Предвыбор — промпт канала, в который пост поедет. Выбор остаётся:
+        # привязка отвечает «чем обычно», а не «чем только и можно».
+        "suggested_prompt": prompts.for_post(db, post),
     })
 
 

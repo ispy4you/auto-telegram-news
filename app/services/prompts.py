@@ -37,6 +37,29 @@ def set_default(db: Session, prompt: Prompt) -> None:
     prompt.is_default = True
 
 
+def for_targets(db: Session, targets) -> Prompt | None:
+    """Промпт первого канала, у которого он задан.
+
+    Пост генерируется один раз на все каналы маршрута, поэтому при двух разных
+    промптах один из них не сработает. Правило простое и объяснимое: побеждает
+    первый по порядку канал. Поле в интерфейсе так и названо — «промпт по
+    умолчанию для постов, идущих в этот канал».
+    """
+    for target in targets:
+        if target.prompt_id:
+            prompt = db.get(Prompt, target.prompt_id)
+            if prompt is not None:
+                return prompt
+    return None
+
+
+def for_post(db: Session, raw_post) -> Prompt | None:
+    """Промпт, с которым пост поедет по своему маршруту."""
+    from app.services import post_routing
+
+    return for_targets(db, post_routing.targets_for(db, raw_post))
+
+
 def rules_for(db: Session, prompt_id: int | None = None) -> str:
     """Текст правил: выбранный промпт, иначе основной, иначе константа из кода.
 
