@@ -50,6 +50,43 @@ class NewsPipelineService:
                     self._record_fetch_error(db, source, msg)
                 except Exception:
                     logger.warning("Failed to record fetch_error ActionLog for source_id=%s", source.id, exc_info=True)
+            else:
+                try:
+                    self._record_fetch_recovered(db, source)
+                except Exception:
+                    logger.warning("Failed to record fetch_recovered ActionLog for source_id=%s", source.id, exc_info=True)
+
+    @staticmethod
+    def _record_fetch_recovered(db: Session, source: SourceChannel) -> None:
+        """Сказать в журнал, что источник снова отвечает.
+
+        Одинаковая ошибка пишется не чаще раза в час, поэтому одна строка про
+        сбой и тишина после неё не означают, что всё починилось — это может быть
+        и продолжающийся сбой. Пара «упало / поднялось» читается однозначно.
+
+        Запрос идёт на каждый удачный сбор, но таблица журнала ограничена сроком
+        хранения, а запрос берёт одну строку — дешевле, чем хранить это состояние
+        в памяти и терять его при каждом деплое.
+        """
+        last = db.scalars(
+            select(ActionLog)
+            .where(
+                ActionLog.entity_type == "SourceChannel",
+                ActionLog.entity_id == str(source.id),
+                ActionLog.action.in_(("fetch_error", "fetch_recovered")),
+            )
+            .order_by(ActionLog.id.desc())
+            .limit(1)
+        ).first()
+        if last is None or last.action != "fetch_error":
+            return
+        db.add(ActionLog(
+            action="fetch_recovered",
+            entity_type="SourceChannel",
+            entity_id=str(source.id),
+            message=f"@{source.username} снова отвечает, сбор восстановлен.",
+        ))
+        db.commit()
 
     @staticmethod
     def _record_fetch_error(db: Session, source: SourceChannel, msg: str) -> None:
