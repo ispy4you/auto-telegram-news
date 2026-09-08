@@ -35,6 +35,12 @@ UPLOAD_TYPES = {
 #: в JPEG на загрузке.
 CONVERT_TO_JPEG = {"image/webp"}
 
+#: Telegram принимает фотографию, только если сумма сторон не больше 10000.
+#: Скриншот с современного монитора в это укладывается, а склейка, панорама или
+#: длинная страница целиком — уже нет: отказ приходит на публикации, когда пост
+#: уже написан и одобрен. Ужимаем на загрузке, пока это ничего не стоит.
+MAX_SIDE_SUM = 10000
+
 #: Больше десяти файлов Telegram в один альбом не соберёт.
 MAX_ITEMS_PER_POST = 10
 
@@ -100,12 +106,61 @@ class MediaStorageService:
             target = await run_in_threadpool(self._to_jpeg, target, label)
             content_type, size = "image/jpeg", target.stat().st_size
 
+        if media_type == MediaType.PHOTO.value:
+            shrunk = await run_in_threadpool(self._shrink_to_limit, target, label)
+            if shrunk is not None:
+                size = shrunk
+
         return {
             "path": str(target),
             "media_type": media_type,
             "file_size": size,
             "mime_type": content_type,
         }
+
+    @staticmethod
+    def _shrink_to_limit(path: Path, label: str) -> int | None:
+        """Ужимает картинку до предела Telegram. Возвращает новый размер файла.
+
+        None — файл остался как есть: так вызывающий не переписывает размер там,
+        где ничего не менялось.
+
+        Нечитаемый файл не отвергаем, а пропускаем. Отказ был бы новой политикой
+        («на загрузку принимаем только то, что разобрала Pillow»), а не частью
+        уменьшения: до этой правки такой файл проходил, и ломать его загрузку
+        заодно — не то, о чём просили. У webp иначе, потому что там перекодировка
+        обязательна: не вышла — отправлять нечего.
+        """
+        from PIL import Image
+
+        try:
+            with Image.open(path) as image:
+                width, height = image.size
+                if width + height <= MAX_SIDE_SUM:
+                    return None
+                # Пропорции сохраняем: Telegram ограничивает ещё и соотношение
+                # сторон, и растянутая картинка упёрлась бы уже в него.
+                factor = MAX_SIDE_SUM / (width + height)
+                new_size = (max(1, int(width * factor)), max(1, int(height * factor)))
+                resized = image.resize(new_size, Image.LANCZOS)
+                if path.suffix.lower() in (".jpg", ".jpeg"):
+                    resized = resized.convert("RGB")
+                    fmt, options = "JPEG", {"quality": 90}
+                else:
+                    fmt, options = None, {}
+        except Exception:
+            logger.warning("Не удалось разобрать %s — оставляем как есть", path, exc_info=True)
+            return None
+
+        try:
+            # Исходник закрыт — пишем поверх него уменьшенный.
+            resized.save(path, fmt, **options)
+        except Exception:
+            logger.warning("Не удалось сохранить уменьшенную %s", path, exc_info=True)
+            raise UploadRejected(f"«{label}»: не удалось уменьшить картинку под предел Telegram.")
+
+        logger.info("Картинка %s ужата до %s: не проходила предел Telegram", path.name, new_size)
+        return path.stat().st_size
 
     @staticmethod
     def _to_jpeg(source: Path, label: str) -> Path:
