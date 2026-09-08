@@ -12,7 +12,7 @@ import io
 import pytest
 from PIL import Image
 
-from app.services.media_storage import MAX_SIDE_SUM, MediaStorageService, UploadRejected
+from app.services.media_storage import MAX_SIDE_SUM, MediaStorageService
 
 
 class _Upload:
@@ -116,8 +116,18 @@ def test_a_video_is_not_touched(storage, db_session):
     assert saved["mime_type"] == "video/mp4"
 
 
-def test_a_file_that_only_pretends_to_be_a_photo_is_refused(storage, db_session):
-    upload = _Upload("злое.jpg", "image/jpeg", b"not an image at all" * 10)
+def test_a_file_pillow_cannot_read_passes_through_unchanged(storage, db_session):
+    """Уменьшение — не повод заводить новую политику приёма.
 
-    with pytest.raises(UploadRejected, match="не удалось прочитать"):
-        _save(storage, db_session, upload)
+    До этой правки такой файл загружался; отвергать его заодно значило бы
+    решить за пользователя, что на загрузку принимается только разобранное
+    Pillow. У webp иначе: там перекодировка обязательна.
+    """
+    payload = b"not an image at all" * 10
+    upload = _Upload("странное.jpg", "image/jpeg", payload)
+
+    saved = _save(storage, db_session, upload)
+
+    from pathlib import Path
+    assert Path(saved["path"]).read_bytes() == payload
+    assert saved["file_size"] == len(payload)

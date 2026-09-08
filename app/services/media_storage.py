@@ -122,8 +122,14 @@ class MediaStorageService:
     def _shrink_to_limit(path: Path, label: str) -> int | None:
         """Ужимает картинку до предела Telegram. Возвращает новый размер файла.
 
-        None — трогать не пришлось: так вызывающий не переписывает размер там,
+        None — файл остался как есть: так вызывающий не переписывает размер там,
         где ничего не менялось.
+
+        Нечитаемый файл не отвергаем, а пропускаем. Отказ был бы новой политикой
+        («на загрузку принимаем только то, что разобрала Pillow»), а не частью
+        уменьшения: до этой правки такой файл проходил, и ломать его загрузку
+        заодно — не то, о чём просили. У webp иначе, потому что там перекодировка
+        обязательна: не вышла — отправлять нечего.
         """
         from PIL import Image
 
@@ -142,11 +148,16 @@ class MediaStorageService:
                     fmt, options = "JPEG", {"quality": 90}
                 else:
                     fmt, options = None, {}
+        except Exception:
+            logger.warning("Не удалось разобрать %s — оставляем как есть", path, exc_info=True)
+            return None
+
+        try:
             # Исходник закрыт — пишем поверх него уменьшенный.
             resized.save(path, fmt, **options)
         except Exception:
-            logger.warning("Не удалось ужать %s до предела Telegram", path, exc_info=True)
-            raise UploadRejected(f"«{label}»: не удалось прочитать файл как картинку.")
+            logger.warning("Не удалось сохранить уменьшенную %s", path, exc_info=True)
+            raise UploadRejected(f"«{label}»: не удалось уменьшить картинку под предел Telegram.")
 
         logger.info("Картинка %s ужата до %s: не проходила предел Telegram", path.name, new_size)
         return path.stat().st_size
