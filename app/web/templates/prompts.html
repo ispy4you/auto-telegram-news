@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if error %}<div class="alert alert-danger alert-dismissible"><i class="bi bi-exclamation-triangle me-2"></i>{{ error }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+{% if ok %}<div class="alert alert-success alert-dismissible"><i class="bi bi-check-circle me-2"></i>{{ ok }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="mb-0 fw-semibold">Промпты</h4>
+    <div class="text-muted small">Правила, по которым AI переписывает новость. Основной используется, когда другой не выбран.</div>
+  </div>
+</div>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <form method="post" action="/prompts" class="row g-2 align-items-end">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="col-sm">
+        <label class="form-label small text-muted mb-1">Название нового промпта</label>
+        <input class="form-control" name="name" maxlength="120" placeholder="Например: Здоровье, короткие посты" required>
+      </div>
+      <div class="col-sm-auto">
+        <button class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Создать</button>
+      </div>
+    </form>
+    <div class="form-text mt-2">Текст скопируется из основного — обычно нужен тот же тон с парой отличий, а не чистый лист.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="list-group list-group-flush">
+    {% for p in prompts %}
+    <div class="list-group-item py-3">
+      <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+        <div style="min-width:0">
+          <div class="fw-semibold">
+            <a href="/prompts/{{ p.id }}" class="text-decoration-none">{{ p.name }}</a>
+            {% if p.is_default %}<span class="badge text-bg-success ms-1">основной</span>{% endif %}
+          </div>
+          <div class="text-muted mt-1" style="font-size:.82rem; white-space:pre-wrap">{{ p.body[:160] }}{% if p.body|length > 160 %}…{% endif %}</div>
+        </div>
+        <div class="d-flex gap-2">
+          <a href="/prompts/{{ p.id }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+          {% if not p.is_default %}
+          <form method="post" action="/prompts/{{ p.id }}/default">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn btn-sm btn-outline-success" title="Сделать основным"><i class="bi bi-star"></i></button>
+          </form>
+          {% endif %}
+          <form method="post" action="/prompts/{{ p.id }}/delete" onsubmit="return confirm('Удалить «{{ p.name }}»?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn btn-sm btn-outline-danger" title="Удалить"><i class="bi bi-x-lg"></i></button>
+          </form>
+        </div>
+      </div>
+    </div>
+    {% else %}
+    <div class="list-group-item text-muted py-4 text-center">Пока ни одного промпта.</div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}

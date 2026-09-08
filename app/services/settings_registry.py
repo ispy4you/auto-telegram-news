@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
-from app.services.ai_prompt import DEFAULT_AI_PROMPT
 
 INT, FLOAT, STR, BOOL = "int", "float", "str", "bool"
 
@@ -72,7 +71,6 @@ REGISTRY: dict[str, Setting] = {s.key: s for s in [
     Setting("display_timezone", STR, DEFAULT_TIMEZONE, strip=True, validate=_valid_timezone),
 
     # ── AI
-    Setting("ai_prompt", STR, DEFAULT_AI_PROMPT),
     Setting("timeweb_ai_gateway_base_url", STR, lambda e: e.timeweb_ai_gateway_base_url or "", strip=True),
     Setting("timeweb_ai_gateway_api_key", STR, lambda e: e.timeweb_ai_gateway_api_key or "", strip=True, secret=True),
     Setting("timeweb_ai_gateway_model", STR, lambda e: e.timeweb_ai_gateway_model or "", strip=True),

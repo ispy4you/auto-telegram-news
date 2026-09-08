@@ -112,6 +112,9 @@
     <a class="nav-link {% if request.url.path.startswith('/stats') %}active{% endif %}" href="/stats">
       <i class="bi bi-bar-chart-line"></i> Статистика
     </a>
+    <a class="nav-link {% if request.url.path.startswith('/prompts') %}active{% endif %}" href="/prompts">
+      <i class="bi bi-card-text"></i> Промпты
+    </a>
     <a class="nav-link {% if request.url.path.startswith('/settings') %}active{% endif %}" href="/settings">
       <i class="bi bi-sliders"></i> Настройки
     </a>
