@@ -131,9 +131,9 @@
           <form method="post" action="/posts/{{ post.id }}/generate" class="d-flex flex-wrap gap-2">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             {% if prompts | length > 1 %}
+            {% set chosen = (suggested_prompt.id if suggested_prompt else none) %}
             <select class="form-select form-select-sm w-auto" name="prompt_id" title="Правила генерации">
               {% for p in prompts %}
-              {% set chosen = (suggested_prompt.id if suggested_prompt else none) %}
               <option value="{{ p.id }}"
                 {% if p.id == chosen or (not chosen and p.is_default) %}selected{% endif %}>{{ p.name }}{% if p.is_default %} (основной){% endif %}</option>
               {% endfor %}
