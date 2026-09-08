@@ -35,9 +35,15 @@ def _image_bytes(width: int, height: int, fmt: str = "JPEG", mode: str = "RGB") 
 
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
-    service = MediaStorageService()
-    monkeypatch.setattr(service.settings, "media_root", tmp_path)
-    return service
+    """Файлы тестов не должны оседать в рабочем каталоге проекта.
+
+    media_root — свойство без сеттера, поэтому подменяем его на классе, как это
+    уже делает test_media_upload.
+    """
+    from app.config import Settings
+
+    monkeypatch.setattr(Settings, "media_root", property(lambda self: tmp_path))
+    return MediaStorageService()
 
 
 def _save(storage, db, upload):
