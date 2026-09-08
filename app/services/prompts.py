@@ -16,8 +16,6 @@ from app.database import SessionLocal
 from app.models import Prompt
 from app.services.ai_prompt import DEFAULT_AI_PROMPT
 
-FALLBACK_NAME = "Основной"
-
 
 def all_prompts(db: Session) -> list[Prompt]:
     """Основной первым, остальные по имени — так его видно без чтения подписей."""
