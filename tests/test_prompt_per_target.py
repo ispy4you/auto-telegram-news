@@ -235,3 +235,14 @@ def test_the_post_page_preselects_the_channel_prompt(logged_in, db_session, read
 
     assert selected == ["Здоровье"], f"предвыбран не тот промпт: {options}"
     assert "Основной" in page, "выбор остаётся доступным"
+
+
+def test_a_hand_made_post_with_a_junk_prompt_is_not_a_crash(logged_in, csrf, target, prompt_pair):
+    """Значение приходит из select, но POST можно собрать и руками."""
+    response = logged_in.post(f"/targets/{target.id}/prompt", data={
+        "csrf_token": csrf(logged_in, "/targets"),
+        "prompt_id": "не-число",
+    })
+
+    assert response.status_code == 302
+    assert "error=" in response.headers["location"]
