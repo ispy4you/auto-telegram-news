@@ -3,6 +3,7 @@
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -24,9 +25,12 @@ _DAY = 86400
 
 @pytest.fixture(autouse=True)
 def media_root(tmp_path, monkeypatch):
-    # media_root в настройках относительный — работаем в своей папке.
-    monkeypatch.chdir(tmp_path)
-    return Path("data/media")
+    # Настоящий media_root относительный, а менять рабочую папку нельзя:
+    # относительно неё приложение ищет шаблоны.
+    root = tmp_path / "data" / "media"
+    root.mkdir(parents=True)
+    monkeypatch.setattr(media_cache, "get_settings", lambda: SimpleNamespace(media_root=root))
+    return root
 
 
 def _post(db, source, message_id: int) -> RawPost:
@@ -37,7 +41,7 @@ def _post(db, source, message_id: int) -> RawPost:
 
 
 def _file(db, post, name: str, age_days: float, origin=MediaOrigin.SOURCE) -> MediaItem:
-    path = Path("data/media/2026/09/01") / str(post.source_id) / str(post.id) / name
+    path = media_cache.get_settings().media_root / "2026/09/01" / str(post.source_id) / str(post.id) / name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(b"x" * 1024)
     stamp = time.time() - age_days * _DAY
