@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost
 from app.services.news_pipeline import NewsPipelineService
-from app.services import post_lifecycle, settings_registry
+from app.services import media_cache, post_lifecycle, settings_registry
 from app.services.retention import prune_action_logs
 from app.services.telegram_publisher import TelegramPublisherService
 
@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 _MAX_RETRY_ATTEMPTS = 3
 _JOB_ID = "main_pipeline"
-# Чистить журнал на каждом прогоне (раз в две минуты) незачем — это скан таблицы.
+# Чистить журнал и медиа на каждом прогоне (раз в две минуты) незачем — это скан
+# таблицы и обход файлов.
 _PRUNE_INTERVAL = timedelta(hours=1)
 # Как часто опрашивать каналы, когда слушатель на связи. Слушатель может считать
 # себя живым и при этом не получать обновления — например, по каналу, на который
@@ -208,6 +209,11 @@ class SchedulerService:
             prune_action_logs(db)
         except Exception:
             logger.warning("Не удалось почистить журнал", exc_info=True)
+            db.rollback()
+        try:
+            media_cache.prune(db)
+        except Exception:
+            logger.warning("Не удалось почистить медиа", exc_info=True)
             db.rollback()
 
     async def trigger_run(self, force_fetch: bool = False) -> int | None:

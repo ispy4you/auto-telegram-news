@@ -25,6 +25,7 @@ DEFAULT_TIMEZONE = "Europe/Moscow"
 # 0.90 выбран консервативно: лучше пропустить повтор, чем склеить разные новости.
 DEFAULT_SEMANTIC_THRESHOLD = 0.90
 DEFAULT_RETENTION_DAYS = 30
+DEFAULT_MEDIA_CACHE_DAYS = 10
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,7 @@ REGISTRY: dict[str, Setting] = {s.key: s for s in [
     Setting("max_post_age_hours", FLOAT, 24.0, minimum=0, maximum=8760),
     Setting("max_media_mb", INT, lambda e: e.max_media_mb, minimum=1, maximum=500),
     Setting("action_log_retention_days", INT, DEFAULT_RETENTION_DAYS, minimum=0, maximum=365),
+    Setting("media_cache_days", INT, DEFAULT_MEDIA_CACHE_DAYS, minimum=0, maximum=365),
 
     # ── Дедупликация
     Setting("duplicate_threshold", INT, 88, minimum=50, maximum=100),
