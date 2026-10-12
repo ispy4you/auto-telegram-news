@@ -29,18 +29,27 @@ logging.getLogger("telethon").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 
-class _SkipHealthAccessLog(logging.Filter):
-    """Health-чек хостинга ходит каждые несколько секунд.
+#: Служебные запросы, которые идут сами по себе, без участия человека.
+_NOISY_PATHS = ("/health", "/api/scheduler-status")
 
-    Хостинг отдаёт только последние 200 строк лога, и все 200 оказывались
-    строками про /health — разобрать по логам реальную проблему было нельзя.
+
+class _SkipNoisyAccessLog(logging.Filter):
+    """Хостинг отдаёт только последние 200 строк лога.
+
+    Сначала все 200 были про /health, который хостинг дёргает каждые несколько
+    секунд. Когда его убрали, их место занял /api/scheduler-status: его опрашивает
+    каждая открытая вкладка панели. Настоящие действия и ошибки в таком логе
+    не найти.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return "/health" not in record.getMessage()
+        # Путь сравниваем целиком, с границей после него: иначе под фильтр
+        # попадёт любой адрес, который просто начинается так же.
+        message = record.getMessage()
+        return not any(f" {path} " in message or f" {path}?" in message for path in _NOISY_PATHS)
 
 
-logging.getLogger("uvicorn.access").addFilter(_SkipHealthAccessLog())
+logging.getLogger("uvicorn.access").addFilter(_SkipNoisyAccessLog())
 
 logger = logging.getLogger(__name__)
 

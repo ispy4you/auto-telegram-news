@@ -184,9 +184,12 @@
     } catch (_) {}
   }
 
+  // Фоновая вкладка таймер не показывает никому, а опрос шёл бы часами.
+  // Вернулись на вкладку — сразу обновляем, чтобы не смотреть на устаревшее.
   poll();
   setInterval(tick, 1000);
-  setInterval(poll, 10000);
+  setInterval(() => { if (!document.hidden) poll(); }, 10000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();
 </script>
 </body>
