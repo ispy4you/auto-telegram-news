@@ -300,6 +300,13 @@
             {{ db_badge('action_log_retention_days', 'Дефолт: 30') }}
           </div>
           <div class="col-md-3">
+            <label class="form-label">Хранить медиа из каналов <span class="text-muted fw-normal">(дней)</span></label>
+            <input class="form-control" type="number" name="media_cache_days" min="0" max="365"
+              value="{{ cfg.get('media_cache_days', '10') }}">
+            <div class="form-text text-muted">Потом файл подкачается из канала при открытии поста. 0 — не чистить</div>
+            {{ db_badge('media_cache_days', 'Дефолт: 10') }}
+          </div>
+          <div class="col-md-3">
             <label class="form-label">Постов за раз <span class="text-muted fw-normal">(на источник)</span></label>
             <input class="form-control" name="default_lookback_limit" value="{{ cfg.get('default_lookback_limit', env.default_lookback_limit) }}">
             {{ db_badge('default_lookback_limit', 'Из .env: ' + env.default_lookback_limit|string) }}
@@ -463,7 +470,7 @@
     </div>
 
     {# Очистка #}
-    <p class="text-muted small mb-2">Удаляет файлы с диска и записи из БД. Сами посты не удаляются; счётчики медиа на постах пересчитываются автоматически.</p>
+    <p class="text-muted small mb-2">Удаляет с диска файлы, пришедшие из каналов. Посты и записи о медиа остаются: файл подкачается из канала, когда откроете пост. Свои загрузки не трогаются. Старше срока из «Хранить медиа из каналов» файлы удаляются и так, раз в час.</p>
     <div class="d-flex gap-2 flex-wrap align-items-center">
       <form method="post" action="/settings/cleanup-media" class="d-flex gap-2 align-items-center">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -474,7 +481,7 @@
           <i class="bi bi-trash me-1"></i>Очистить
         </button>
       </form>
-      <form method="post" action="/settings/cleanup-media" onsubmit="return confirm('Удалить ВСЕ медиафайлы? Отменить нельзя.')">
+      <form method="post" action="/settings/cleanup-media" onsubmit="return confirm('Удалить все файлы из каналов? Они подкачаются при открытии постов.')">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="days" value="0">
         <button class="btn btn-sm btn-danger">

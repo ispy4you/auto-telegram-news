@@ -1,7 +1,6 @@
 import logging
 import time
 import urllib.parse
-from datetime import timedelta
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
@@ -12,11 +11,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActionLog, AppSetting, MediaItem, MediaType, RawPost
-from app.services import embedder, settings_registry
+from app.services import embedder, media_cache, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.prompt_settings import get_display_timezone
 from app.web.auth import require_auth
-from app.web.routes.common import tpl, utcnow
+from app.web.routes.common import tpl
 
 logger = logging.getLogger(__name__)
 
@@ -214,67 +213,22 @@ def cleanup_media(
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
-    media_dir = Path("data/media")
-    deleted_files = 0
-    freed_bytes = 0
-    affected_post_ids: set[int] = set()
+    """Ручная чистка — то же, что плановая, только с выбранным сроком.
 
-    if days <= 0:
-        # Удалить всё: сначала все файлы с диска напрямую, потом все записи из БД
-        if media_dir.exists():
-            for f in media_dir.rglob("*"):
-                if f.is_file():
-                    freed_bytes += f.stat().st_size
-                    f.unlink(missing_ok=True)
-                    deleted_files += 1
-        # Очистить все MediaItem из БД
-        all_items = db.scalars(select(MediaItem)).all()
-        for item in all_items:
-            affected_post_ids.add(item.raw_post_id)
-            db.delete(item)
-        label = "все"
-    else:
-        cutoff = utcnow() - timedelta(days=days)
-        old_items = db.scalars(select(MediaItem).where(MediaItem.created_at < cutoff)).all()
-        for item in old_items:
-            p = Path(item.file_path)
-            if p.exists():
-                freed_bytes += p.stat().st_size
-                p.unlink(missing_ok=True)
-                deleted_files += 1
-            affected_post_ids.add(item.raw_post_id)
-            db.delete(item)
-        label = f"старше {days} дн."
-
-    db.flush()
-
-    # Пересчитать has_media / media_count на затронутых постах
-    for post_id in affected_post_ids:
-        post = db.get(RawPost, post_id)
-        if post:
-            remaining = db.scalar(
-                select(func.count()).select_from(MediaItem).where(MediaItem.raw_post_id == post_id)
-            ) or 0
-            post.media_count = remaining
-            post.has_media = remaining > 0
-
-    freed_mb = round(freed_bytes / 1024 / 1024, 1)
+    Раньше кнопка удаляла вместе с файлами и записи о них. После этого медиа
+    пропадало из поста насовсем: перекачивать было нечего, хотя оригинал
+    по-прежнему лежал в канале. Теперь удаляются только файлы, а свои загрузки
+    редактора не трогаются — их неоткуда вернуть.
+    """
+    freed = media_cache.drop_source_files(db, None if days <= 0 else days)
+    label = "все" if days <= 0 else f"старше {days} дн."
     db.add(ActionLog(
         action="media_cleanup",
         entity_type="MediaItem",
         entity_id="bulk",
-        message=f"Удалено {deleted_files} файлов ({freed_mb} МБ), {label}. Обновлено постов: {len(affected_post_ids)}",
+        message=f"Удалено {freed.files} файлов из каналов ({freed.mb} МБ), {label}.",
     ))
     db.commit()
 
-    # Удалить пустые папки
-    if media_dir.exists():
-        for d in sorted(media_dir.rglob("*"), reverse=True):
-            if d.is_dir():
-                try:
-                    d.rmdir()
-                except OSError:
-                    pass
-
-    msg = f"Удалено {deleted_files} файлов, освобождено {freed_mb} МБ"
+    msg = f"Удалено {freed.files} файлов, освобождено {freed.mb} МБ"
     return RedirectResponse(url=f"/settings?ok={urllib.parse.quote(msg)}", status_code=302)
