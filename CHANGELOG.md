@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.5.0...v1.6.0) (2026-10-15)
+
+
+### Features
+
+* развёртывание в Timeweb одной командой ([#53](https://github.com/ispy4you/auto-telegram-news/issues/53)) ([eef4015](https://github.com/ispy4you/auto-telegram-news/commit/eef401567e66c264102a1a7c33e7453080add6c9))
+
+
+### Bug Fixes
+
+* второй проект больше не падает на дубликате id ([#54](https://github.com/ispy4you/auto-telegram-news/issues/54)) ([fb9ab4b](https://github.com/ispy4you/auto-telegram-news/commit/fb9ab4b5d34c50ddac9bccf46de4be361f39e0a2))
+
 ## [1.5.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.4.0...v1.5.0) (2026-10-12)
 
 
