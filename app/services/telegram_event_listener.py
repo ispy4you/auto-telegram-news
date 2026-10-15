@@ -11,6 +11,12 @@ from app.models import ActionLog, SourceChannel
 logger = logging.getLogger(__name__)
 
 _RECONNECT_DELAY = 30  # секунд между попытками переподключения
+# Потолок паузы, пока причина обрыва не меняется. Повторять попытку раз в
+# полминуты осмысленно при мигающей сети, но не при отсутствующей сессии:
+# её возвращает человек в панели, и панель сама перезапускает слушателя.
+_RECONNECT_DELAY_MAX = 300
+# Как часто одна и та же причина обрыва повторяется в логе контейнера.
+_LOG_QUIET_PERIOD = timedelta(hours=1)
 _SOURCE_RELOAD_INTERVAL = 300  # секунд между обновлением списка каналов
 # Как долго одно и то же состояние считается уже записанным в журнал.
 _NOTE_QUIET_PERIOD = timedelta(hours=1)
@@ -46,6 +52,10 @@ class TelegramEventListenerService:
         self._album_buffer: dict[int, list] = defaultdict(list)
         self._album_tasks: dict[int, asyncio.Task] = {}
         self._noted_at: dict[str, datetime] = {}  # сообщение -> когда записали
+        self._failure_reason: str | None = None   # причина последнего обрыва
+        self._failure_logged_at: datetime | None = None
+        self._failure_count = 0
+        self._reconnect_delay = _RECONNECT_DELAY
 
     @property
     def is_active(self) -> bool:
@@ -164,6 +174,52 @@ class TelegramEventListenerService:
             self._noted_at.clear()
         self._noted_at[message] = now
 
+    def _log_failure(self, reason: str) -> None:
+        """Пишет причину обрыва в лог и растит паузу, пока причина не меняется.
+
+        Раньше здесь было безусловное предупреждение раз в 30 секунд. На
+        установке без входа в Telegram оно за несколько минут занимало весь
+        короткий лог хостинга: 156 строк из 200 — одна и та же фраза. Любой
+        взгляд в лог выглядел как авария, а настоящую ошибку в нём было не
+        найти.
+
+        Поэтому новую причину пишем сразу, ту же самую — не чаще раза в час,
+        указывая, сколько попыток прошло. Пауза между попытками при этом
+        удваивается до потолка: ждать входа в панели нет смысла каждые
+        полминуты, а после входа панель перезапускает слушателя сама.
+        """
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        if reason != self._failure_reason:
+            self._failure_reason = reason
+            self._failure_logged_at = None
+            self._failure_count = 1
+            self._reconnect_delay = _RECONNECT_DELAY
+        else:
+            self._failure_count += 1
+            self._reconnect_delay = min(self._reconnect_delay * 2, _RECONNECT_DELAY_MAX)
+
+        logged_at = self._failure_logged_at
+        if logged_at is not None and now - logged_at < _LOG_QUIET_PERIOD:
+            return
+        if self._failure_count > 1:
+            logger.warning(
+                "Event listener отключился: %s — попыток: %d, следующая через %ds",
+                reason, self._failure_count, self._reconnect_delay,
+            )
+        else:
+            logger.warning(
+                "Event listener отключился: %s — переподключение через %ds",
+                reason, self._reconnect_delay,
+            )
+        self._failure_logged_at = now
+
+    def _forget_failure(self) -> None:
+        """Удачное подключение обнуляет и счётчик попыток, и паузу."""
+        self._failure_reason = None
+        self._failure_logged_at = None
+        self._failure_count = 0
+        self._reconnect_delay = _RECONNECT_DELAY
+
     async def _run_loop(self) -> None:
         from app.services.telegram_reader import TelegramReaderService
         self._reader = TelegramReaderService()
@@ -178,21 +234,18 @@ class TelegramEventListenerService:
                     "listener_disconnected",
                     "Соединение с Telegram закрыто, переподключаемся.",
                 )
-                logger.warning("Event listener: соединение закрыто — переподключение через %ds", _RECONNECT_DELAY)
+                self._log_failure("соединение закрыто Telegram")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
                 self._active = False
-                logger.warning(
-                    "Event listener отключился: %s — переподключение через %ds",
-                    exc, _RECONNECT_DELAY,
-                )
+                self._log_failure(str(exc))
                 self._note(
                     "listener_needs_login" if self._needs_login else "listener_error",
                     f"Слушатель Telegram отключён: {exc}",
                 )
             try:
-                await asyncio.sleep(_RECONNECT_DELAY)
+                await asyncio.sleep(self._reconnect_delay)
             except asyncio.CancelledError:
                 raise
 
@@ -246,6 +299,7 @@ class TelegramEventListenerService:
         # Активируем ДО catch-up — планировщик сразу переходит в режим skip_fetch
         await self.reload_sources()
         self._active = True
+        self._forget_failure()
         logger.info("Event listener активен, слушает %d каналов", len(self._source_usernames))
         self._note(
             "listener_connected",
