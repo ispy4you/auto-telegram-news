@@ -240,6 +240,46 @@ docker compose up -d --build
 
 Остановить: `docker compose down` (добавьте `-v`, чтобы также удалить том с базой данных).
 
+### Развёртывание в Timeweb Cloud
+
+Панель рассчитана на App Platform: приложение собирается из `Dockerfile` прямо из этого
+репозитория, а база берётся отдельным управляемым кластером PostgreSQL. Порядок шагов собран
+в [scripts/deploy_timeweb.py](scripts/deploy_timeweb.py) — он ходит в API аккаунта, панель не
+нужна.
+
+Понадобится токен из раздела [API и Terraform](https://timeweb.cloud/my/api-keys):
+
+```bash
+export TIMEWEB_CLOUD_TOKEN='ваш-токен'
+
+# что есть в аккаунте: проекты, приватные сети, тарифы, репозитории
+scripts/deploy_timeweb.py catalog
+
+# кластер PostgreSQL: тариф и зона — из catalog, сеть необязательна
+scripts/deploy_timeweb.py db --preset <preset-id> --zone <zone> \
+  --network <network-id> --project <project-id>
+
+# пользователь становится владельцем своей логической базы
+scripts/deploy_timeweb.py own --cluster <cluster-id>
+
+# приложение из репозитория; переменные берутся из .env, DATABASE_URL подставляется сам
+scripts/deploy_timeweb.py app --cluster <cluster-id> --preset <preset-id> \
+  --provider <provider-id> --repository <repository-id> \
+  --commit $(git rev-parse origin/main) --network <network-id> --project <project-id>
+
+scripts/deploy_timeweb.py status
+```
+
+Две вещи, из-за которых первый запуск обычно и не удаётся:
+
+- **Владелец базы.** В PostgreSQL 15 и новее создавать таблицы в схеме `public` может только
+  владелец базы, а платформа выдаёт пользователя без владения — миграции падают на правах.
+  Это и делает команда `own`, её нельзя пропускать.
+- **Переменные окружения задаются только при создании приложения.** Потом они правятся лишь
+  в панели, поэтому `.env` должен быть готов до запуска команды `app`. Приложение и кластер
+  стоит держать в одной приватной сети: тогда база ходит по внутреннему адресу и не выставлена
+  в интернет.
+
 ### Установка вручную
 
 Хотите запускать напрямую через свой Python/PostgreSQL вместо Docker? Ниже — как это сделать.
