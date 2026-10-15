@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.6.0...v1.6.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* повторяющийся обрыв слушателя не забивает лог ([#57](https://github.com/ispy4you/auto-telegram-news/issues/57)) ([b4f7e2f](https://github.com/ispy4you/auto-telegram-news/commit/b4f7e2fa465db8b00cf20fa2285652f06176967e))
+
 ## [1.6.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.5.0...v1.6.0) (2026-10-15)
 
 
