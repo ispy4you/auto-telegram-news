@@ -242,6 +242,46 @@ beyond local testing, since `docker-compose.yml` builds `DATABASE_URL` from thes
 
 To stop: `docker compose down` (add `-v` to also wipe the database volume).
 
+### Deploy to Timeweb Cloud
+
+The panel is built for App Platform: the app is built from the `Dockerfile` in this repository,
+while the database is a separate managed PostgreSQL cluster. The whole sequence lives in
+[scripts/deploy_timeweb.py](scripts/deploy_timeweb.py), which talks to the account API — no
+clicking through the control panel.
+
+You need an API token from [API & Terraform](https://timeweb.cloud/my/api-keys):
+
+```bash
+export TIMEWEB_CLOUD_TOKEN='your-token'
+
+# what the account has: projects, private networks, presets, repositories
+scripts/deploy_timeweb.py catalog
+
+# PostgreSQL cluster: preset and zone come from catalog, the network is optional
+scripts/deploy_timeweb.py db --preset <preset-id> --zone <zone> \
+  --network <network-id> --project <project-id>
+
+# make the cluster user the owner of its logical database
+scripts/deploy_timeweb.py own --cluster <cluster-id>
+
+# the app itself; variables come from .env, DATABASE_URL is filled in automatically
+scripts/deploy_timeweb.py app --cluster <cluster-id> --preset <preset-id> \
+  --provider <provider-id> --repository <repository-id> \
+  --commit $(git rev-parse origin/main) --network <network-id> --project <project-id>
+
+scripts/deploy_timeweb.py status
+```
+
+Two things that usually break a first deploy:
+
+- **Database ownership.** On PostgreSQL 15 and newer only the database owner may create tables
+  in the `public` schema, and the platform hands out a user without ownership — migrations fail
+  on permissions. That is what `own` fixes; do not skip it.
+- **Environment variables can only be set when the app is created.** Afterwards they are
+  editable in the control panel only, so `.env` must be final before you run `app`. Keep the app
+  and the cluster in the same private network: the database is then reached over an internal
+  address and is not exposed to the internet.
+
 ### Manual installation
 
 Prefer running it directly with your own Python/PostgreSQL instead of Docker? See below.
