@@ -1,8 +1,9 @@
 import logging
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -134,10 +135,42 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 app.include_router(router)
 
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Браузер просит /favicon.ico сам, не читая разметку.
+
+    Без этой ручки каждая вкладка оставляла в логе 404, а лог на хостинге
+    короткий — в нём и так тесно.
+    """
+    return FileResponse("app/web/static/favicon.svg", media_type="image/svg+xml")
+
+
 @app.get("/health", include_in_schema=False)
 async def health():
     """Проверка состояния для App Platform: без БД и внешних сервисов."""
     return {"status": "ok"}
+
+
+@app.get("/health/db", include_in_schema=False)
+async def health_db():
+    """Отдельная проверка базы — специально не внутри /health.
+
+    По /health хостинг решает, жив ли контейнер, и перезапускает его, когда
+    ответа нет. Недоступность базы перезапуском не лечится, так что подмешивать
+    её туда нельзя: отвалившийся на минуту кластер уронил бы приложение в цикл
+    перезапусков. Эта ручка нужна внешнему наблюдению и человеку.
+
+    Текст ошибки наружу не отдаётся: в исключениях SQLAlchemy встречается
+    строка подключения вместе с паролем. Подробности уходят в лог.
+    """
+    started = time.perf_counter()
+    try:
+        with SessionLocal() as db:
+            db.execute(select(1))
+    except Exception:
+        logger.warning("Проверка базы не прошла", exc_info=True)
+        return JSONResponse(status_code=503, content={"status": "error"})
+    return {"status": "ok", "latency_ms": round((time.perf_counter() - started) * 1000, 1)}
 
 
 @app.exception_handler(HTTPException)
