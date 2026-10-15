@@ -1,15 +1,20 @@
 """Проверки живости: /health не должен зависеть от базы, /health/db — должен."""
 
 from app import main
+from app.database import get_db
 
 
-def test_health_does_not_touch_db(client, monkeypatch):
+class _BrokenSession:
+    """Сессия, которая падает на первом же запросе — как недоступный кластер."""
+
+    def execute(self, *args, **kwargs):
+        raise RuntimeError("postgresql://user:секрет@10.0.0.4:5432/db недоступна")
+
+
+def test_health_does_not_touch_db(client):
     # Если /health начнёт ходить в базу, хостинг будет перезапускать контейнер
     # из-за недоступного кластера — поэтому ломаем сессию и ждём тот же ответ.
-    def explode():
-        raise RuntimeError("база недоступна")
-
-    monkeypatch.setattr(main, "SessionLocal", explode)
+    main.app.dependency_overrides[get_db] = _BrokenSession
     response = client.get("/health")
 
     assert response.status_code == 200
@@ -25,13 +30,10 @@ def test_health_db_reports_ok(client):
     assert body["latency_ms"] >= 0
 
 
-def test_health_db_hides_error_details(client, monkeypatch, caplog):
+def test_health_db_hides_error_details(client, caplog):
     # В исключениях SQLAlchemy попадается строка подключения с паролем,
     # поэтому наружу уходит только статус, а подробности — в лог.
-    def explode():
-        raise RuntimeError("postgresql://user:секрет@192.168.0.4:5432/db недоступна")
-
-    monkeypatch.setattr(main, "SessionLocal", explode)
+    main.app.dependency_overrides[get_db] = _BrokenSession
     with caplog.at_level("WARNING"):
         response = client.get("/health/db")
 
