@@ -16,7 +16,10 @@ from app.services.telegram_publisher import BotTokenError, TelegramPublisherServ
 
 @pytest.fixture
 def target(db_session):
-    db_session.add(Project(id=1, name="Default", slug="default"))
+    # Проект «Default» заводит фикстура client, когда тест работает через панель;
+    # в остальных случаях его здесь нет, а каналу он нужен.
+    if not db_session.get(Project, 1):
+        db_session.add(Project(id=1, name="Default", slug="default"))
     channel = TargetChannel(title="Канал", chat_id="@kanal", project_id=1)
     db_session.add(channel)
     db_session.commit()
