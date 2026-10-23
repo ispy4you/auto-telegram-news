@@ -1,5 +1,7 @@
 import logging
+import re
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -12,14 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal, get_db
-from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus
 from app.migrations import run_migrations
 from app.services import telegram_session_store
 from app.services.scheduler import SchedulerService
 from app.services.telegram_event_listener import TelegramEventListenerService
 from app.services.telegram_login import TelegramLoginService
 from app.web.csrf import CSRFMiddleware
+from app.web.request_log import ActionLogMiddleware, who
 from app.web.routes import router
+from app.web.routes.common import templates
 
 logging.basicConfig(
     level=logging.INFO,
@@ -131,9 +135,57 @@ app = FastAPI(
 # So we add CSRF first (inner), then Session (outer).
 app.add_middleware(CSRFMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=settings.app_secret_key, https_only=not _is_local)
+# Снаружи сессии: тогда в строку действия попадает признак входа, и видны даже
+# те ответы, которые вернула сама защита от подделки запросов.
+app.add_middleware(ActionLogMiddleware)
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 # /media is served via an authenticated route in routes.py — not a public StaticFiles mount.
 app.include_router(router)
+
+
+#: Фабрика сессий для записи ошибок в журнал. Своя, а не зависимость запроса:
+#: транзакция запроса в момент падения уже может быть испорчена. Тесты её подменяют.
+journal_session = SessionLocal
+
+#: Пароль внутри строки подключения: он попадается в текстах ошибок SQLAlchemy.
+_SECRET_IN_URL = re.compile(r"://[^:@/\s]+:[^@/\s]+@")
+
+
+def _without_secrets(text: str) -> str:
+    return _SECRET_IN_URL.sub("://<скрыто>@", text)
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, exc: Exception):
+    """Любая непойманная ошибка: код оператору, подробности в лог и журнал.
+
+    Раньше здесь не было ничего, и браузер получал от uvicorn строку
+    «Internal Server Error» без объяснений, а трейсбек оставался в логе
+    контейнера — куда оператор не смотрит и не должен.
+
+    Теперь у каждой ошибки есть короткий код. По нему запись находится и в
+    журнале панели, и в логе, так что разговор начинается не с «что-то упало
+    где-то», а с конкретного действия.
+    """
+    code = uuid.uuid4().hex[:6].upper()
+    logger.error(
+        "Ошибка %s: %s %s от %s — %s",
+        code, request.method, request.url.path, who(request), exc, exc_info=True,
+    )
+    reason = _without_secrets(f"{type(exc).__name__}: {exc}")[:400]
+    try:
+        with journal_session() as db:
+            db.add(ActionLog(
+                action="server_error",
+                entity_type="Request",
+                entity_id=code,
+                message=f"{request.method} {request.url.path} → {reason}",
+            ))
+            db.commit()
+    except Exception:
+        # Журнал мог стать недоступен вместе с базой — это и могло быть причиной.
+        logger.warning("Ошибку %s не удалось записать в журнал", code, exc_info=True)
+    return templates.TemplateResponse(request, "error.html", {"code": code}, status_code=500)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
