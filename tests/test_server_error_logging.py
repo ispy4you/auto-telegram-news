@@ -33,16 +33,20 @@ def crashing_client(db_session, monkeypatch):
     async def boom():
         raise RuntimeError(f"подключение {SECRET_URL} потеряно")
 
+    async def api_boom():
+        raise RuntimeError("и здесь тоже")
+
     main_module.app.dependency_overrides[get_db] = lambda: db_session
     monkeypatch.setattr(main_module, "journal_session", sessionmaker(bind=db_session.get_bind()))
     main_module.app.add_api_route("/__boom", boom, methods=["GET"], include_in_schema=False)
+    main_module.app.add_api_route("/api/__boom", api_boom, methods=["GET"], include_in_schema=False)
     try:
         yield TestClient(main_module.app, raise_server_exceptions=False, follow_redirects=False)
     finally:
         main_module.app.dependency_overrides.clear()
         main_module.app.router.routes = [
             route for route in main_module.app.router.routes
-            if getattr(route, "path", "") != "/__boom"
+            if getattr(route, "path", "") not in {"/__boom", "/api/__boom"}
         ]
 
 
@@ -91,12 +95,29 @@ def test_a_failed_journal_write_does_not_hide_the_page(crashing_client, monkeypa
     assert "не удалось записать в журнал" in caplog.text
 
 
+def _action_lines(caplog):
+    """Только строки нашего логгера: в caplog попадают записи и чужих."""
+    return [r.getMessage() for r in caplog.records if r.name == "app.web.request_log"]
+
+
+def test_the_api_gets_json_instead_of_a_page(crashing_client):
+    """Эти адреса читает разметка панели: HTML она разобрать не сможет."""
+    response = crashing_client.get("/api/__boom")
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["status"] == "error"
+    assert re.fullmatch(r"[0-9A-F]{6}", body["code"])
+
+
 def test_clicks_are_logged_with_the_address_and_whether_it_is_a_guest(client, caplog):
     with caplog.at_level("INFO", logger="app.web.request_log"):
         client.post("/login", data={"username": "admin", "password": "неверный"})
 
-    assert "POST /login" in caplog.text
-    assert "гость" in caplog.text
+    lines = _action_lines(caplog)
+    assert len(lines) == 1
+    assert "POST /login" in lines[0]
+    assert "гость" in lines[0]
 
 
 def test_successful_pages_are_not_logged(client, caplog):
@@ -104,7 +125,7 @@ def test_successful_pages_are_not_logged(client, caplog):
     with caplog.at_level("INFO", logger="app.web.request_log"):
         client.get("/login")
 
-    assert caplog.text == ""
+    assert _action_lines(caplog) == []
 
 
 def test_a_rejected_request_is_logged(client, caplog):
@@ -112,4 +133,4 @@ def test_a_rejected_request_is_logged(client, caplog):
         response = client.post("/projects", data={"name": "без токена"})
 
     assert response.status_code == 403
-    assert "403" in caplog.text
+    assert any("403" in line for line in _action_lines(caplog))

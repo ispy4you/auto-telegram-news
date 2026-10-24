@@ -185,6 +185,10 @@ async def unhandled_error(request: Request, exc: Exception):
     except Exception:
         # Журнал мог стать недоступен вместе с базой — это и могло быть причиной.
         logger.warning("Ошибку %s не удалось записать в журнал", code, exc_info=True)
+    if request.url.path.startswith("/api/"):
+        # Эти адреса дёргает разметка панели, а не человек: страница с
+        # объяснением там бесполезна, а разбор ответа как JSON — обязателен.
+        return JSONResponse(status_code=500, content={"status": "error", "code": code})
     return templates.TemplateResponse(request, "error.html", {"code": code}, status_code=500)
 
 

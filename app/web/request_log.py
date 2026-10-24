@@ -14,7 +14,6 @@
 import logging
 import time
 
-from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from app.web.auth import SESSION_KEY
@@ -36,24 +35,46 @@ def who(request: Request) -> str:
     return f"{client} ({'вошёл' if session.get(SESSION_KEY) else 'гость'})"
 
 
-class ActionLogMiddleware(BaseHTTPMiddleware):
-    """Пишет в лог, кто что нажал и что получил в ответ."""
+class ActionLogMiddleware:
+    """Пишет в лог, кто что нажал и что получил в ответ.
 
-    async def dispatch(self, request: Request, call_next):
+    Обычная ASGI-middleware, а не BaseHTTPMiddleware: она стоит на каждом
+    запросе, а панель отдаёт медиафайлы — до пятидесяти мегабайт. Базовый
+    класс прогонял бы тело каждого такого ответа через промежуточный поток,
+    хотя нужен от ответа только его код.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        request = Request(scope)
         started = time.perf_counter()
+        status = 0
+
+        async def capture(message):
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
         try:
-            response = await call_next(request)
+            await self.app(scope, receive, capture)
         except Exception:
             # Трейсбек и код ошибки печатает обработчик исключений в main;
             # здесь остаётся строка действия, чтобы в логе было видно, какое
             # нажатие его вызвало.
             logger.warning("%s %s от %s → ошибка", request.method, request.url.path, who(request))
             raise
+
         took_ms = int((time.perf_counter() - started) * 1000)
-        if request.method != "GET" or response.status_code >= 400:
-            write = logger.warning if response.status_code >= 400 else logger.info
+        if request.method != "GET" or status >= 400:
+            write = logger.warning if status >= 400 else logger.info
             write(
                 "%s %s от %s → %s за %dмс",
-                request.method, request.url.path, who(request), response.status_code, took_ms,
+                request.method, request.url.path, who(request), status, took_ms,
             )
-        return response
