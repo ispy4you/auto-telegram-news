@@ -74,3 +74,15 @@ def test_a_duplicate_says_so_instead_of_blaming_the_model(logged_in, db_session,
 
     assert "Признан повтором" in page
     assert "Отклонён AI" not in page
+
+
+def test_a_published_post_is_not_branded_as_rejected(logged_in, db_session, source):
+    """«Отпр. как есть» оставляет старую причину в базе — но пост уже вышел."""
+    post = _rejected_post(db_session, source)
+    post.status = RawPostStatus.PUBLISHED.value
+    db_session.commit()
+
+    page = logged_in.get(f"/posts/{post.id}").text
+
+    assert "Отклонён AI" not in page
+    assert LONG_REASON not in page

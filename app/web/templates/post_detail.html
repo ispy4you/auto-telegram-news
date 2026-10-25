@@ -47,9 +47,13 @@
         </div>
         {% endif %}
 
-        {% if post.ai_skip_reason %}
+        {% if post.status in ('rejected', 'duplicate') and post.ai_skip_reason %}
         {# Страница поста — единственное место, где причина отказа видна целиком
-           и без нажатий: сюда и приходят, когда в списке её не хватило. #}
+           и без нажатий: сюда и приходят, когда в списке её не хватило.
+
+           Статус проверяем, как и в списке: отправленный «как есть» пост
+           сохраняет старую причину в базе, и без проверки опубликованная
+           новость выглядела бы отклонённой. #}
         <div class="alert alert-danger py-2 px-3 mb-3" style="font-size:.85rem">
           <div class="fw-semibold mb-1">
             <i class="bi bi-robot me-1"></i>{% if post.status == 'duplicate' %}Признан повтором{% else %}Отклонён AI{% endif %}
