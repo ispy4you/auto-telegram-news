@@ -158,7 +158,7 @@ def test_a_channel_we_were_not_let_into_says_so(db_session):
     with pytest.raises(RuntimeError) as exc:
         asyncio.run(TelegramReaderService()._resolve_entity(object(), waiting))
 
-    assert "заявка" in str(exc.value).lower()
+    assert "заявку ещё не одобрили" in str(exc.value).lower()
 
 
 def test_resolving_by_name_remembers_the_id(db_session, source):
