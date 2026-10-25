@@ -93,6 +93,19 @@ async def _add_private_source(request: Request, db: Session, title: str, invite:
             status_code=302,
         )
 
+    # Тот же канал мог быть заведён раньше — по имени или по другой ссылке.
+    # Два источника на один канал дали бы две одинаковых ленты и два ключа,
+    # по которым слушатель выбирал бы первый попавшийся.
+    if outcome.channel_id:
+        twin = db.scalar(
+            select(SourceChannel).where(SourceChannel.telegram_channel_id == outcome.channel_id)
+        )
+        if twin is not None:
+            return RedirectResponse(
+                url=f"/sources?error={urllib.parse.quote(f'Этот канал уже заведён как «{twin.title}»')}",
+                status_code=302,
+            )
+
     source = SourceChannel(
         title=title or outcome.title or "Закрытый канал",
         username=None,

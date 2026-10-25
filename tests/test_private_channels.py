@@ -297,3 +297,28 @@ def test_a_temporary_peek_is_not_membership():
     client = _FakeClient(ChatInvitePeek(chat=_channel(99), expires=datetime(2026, 1, 1)))
 
     assert asyncio.run(telegram_invites.check(client, "hash")) is None
+
+
+def test_one_channel_does_not_become_two_sources(logged_in, db_session, csrf, monkeypatch):
+    """Канал мог быть заведён раньше — по имени или по другой ссылке."""
+    from app.services.telegram_invites import InviteOutcome
+    from app.services.telegram_reader import TelegramReaderService
+
+    db_session.add(SourceChannel(
+        title="Он же, по имени", username="known", url="https://t.me/known",
+        telegram_channel_id=777, project_id=1,
+    ))
+    db_session.commit()
+
+    async def _let_in(self, invite_hash):
+        return InviteOutcome("joined", "Закрытый", 777)
+
+    monkeypatch.setattr(TelegramReaderService, "join_invite", _let_in)
+
+    answer = logged_in.post("/sources", data={
+        "title": "Закрытый", "username_or_url": "https://t.me/+hash",
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    assert "error=" in answer.headers["location"]
+    assert db_session.query(SourceChannel).filter_by(telegram_channel_id=777).count() == 1
