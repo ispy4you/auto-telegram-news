@@ -31,7 +31,12 @@
               {{ (g.edited_text or g.generated_text or '') | truncate(180) }}
             </div>
             {% if g.generation_error %}
-            <div class="text-danger" style="font-size:.78rem">{{ g.generation_error | truncate(120) }}</div>
+            <div class="text-danger reason" style="font-size:.78rem;line-height:1.4;max-width:520px">
+              <span class="reason-text">{{ g.generation_error }}</span>
+              {% if g.generation_error|length > 150 %}
+              <button type="button" class="btn btn-link btn-sm p-0 align-baseline text-danger reason-more" style="font-size:.78rem">подробнее</button>
+              {% endif %}
+            </div>
             {% endif %}
           </td>
           <td class="text-muted small">{{ g.model_name }}</td>
