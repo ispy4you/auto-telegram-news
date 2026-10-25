@@ -1,0 +1,173 @@
+"""Закрытый канал как источник: ссылка, заявка, чтение по id.
+
+Заявка закрывает вступление, а не чтение: публичный канал читается без неё,
+а закрытый — только после одобрения. Телеграм об одобрении не сообщает,
+поэтому панель спрашивает сама.
+"""
+
+import asyncio
+from types import SimpleNamespace
+
+import pytest
+from telethon.errors import InviteHashInvalidError, InviteRequestSentError
+from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
+from telethon.tl.types import ChatInviteAlready
+
+from app.models import SourceChannel
+from app.services import telegram_invites
+from app.services.telegram_invites import InviteError, parse_invite
+
+
+class _FakeClient:
+    """Телеграм в двух ответах: что говорит проверка ссылки и что — вступление."""
+
+    def __init__(self, check, imported=None):
+        self._check = check
+        self._imported = imported
+        self.calls: list[str] = []
+
+    async def __call__(self, request):
+        if isinstance(request, CheckChatInviteRequest):
+            self.calls.append("check")
+            if isinstance(self._check, Exception):
+                raise self._check
+            return self._check
+        if isinstance(request, ImportChatInviteRequest):
+            self.calls.append("import")
+            if isinstance(self._imported, Exception):
+                raise self._imported
+            return self._imported
+        raise AssertionError(f"неожиданный запрос: {request}")
+
+
+def _channel(channel_id=777, title="Закрытый"):
+    return SimpleNamespace(id=channel_id, title=title, username=None)
+
+
+def _invite(title="Закрытый", request_needed=True):
+    """Ответ Telegram о канале, в котором нас ещё нет."""
+    return SimpleNamespace(title=title, request_needed=request_needed, chat=None)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("https://t.me/+AbCd-123", "AbCd-123"),
+    ("t.me/joinchat/XyZ_987", "XyZ_987"),
+    ("http://telegram.me/+QwErTy", "QwErTy"),
+    ("@channel", None),
+    ("https://t.me/channel", None),
+    ("", None),
+])
+def test_an_invite_link_is_told_apart_from_a_name(text, expected):
+    assert parse_invite(text) == expected
+
+
+def test_a_channel_with_approval_leaves_us_waiting():
+    client = _FakeClient(_invite(), InviteRequestSentError(None))
+
+    outcome = asyncio.run(telegram_invites.join(client, "hash"))
+
+    assert outcome.state == telegram_invites.REQUESTED
+    assert outcome.channel_id is None, "канала у нас ещё нет"
+    assert outcome.title == "Закрытый", "название видно и до одобрения"
+
+
+def test_a_channel_without_approval_lets_us_in_at_once():
+    client = _FakeClient(_invite(request_needed=False),
+                         SimpleNamespace(chats=[_channel(555)]))
+
+    outcome = asyncio.run(telegram_invites.join(client, "hash"))
+
+    assert outcome.state == telegram_invites.JOINED
+    assert outcome.channel_id == 555
+
+
+def test_an_approved_request_is_seen_on_the_next_check():
+    """После одобрения Telegram отдаёт по той же ссылке сам канал."""
+    client = _FakeClient(ChatInviteAlready(chat=_channel(321)))
+
+    outcome = asyncio.run(telegram_invites.check(client, "hash"))
+
+    assert outcome is not None
+    assert (outcome.state, outcome.channel_id) == (telegram_invites.JOINED, 321)
+    assert client.calls == ["check"], "вступать повторно незачем"
+
+
+def test_a_pending_request_is_not_mistaken_for_membership():
+    client = _FakeClient(_invite())
+
+    assert asyncio.run(telegram_invites.check(client, "hash")) is None
+
+
+def test_a_dead_link_is_explained_in_words():
+    client = _FakeClient(InviteHashInvalidError(None))
+
+    with pytest.raises(InviteError) as exc:
+        asyncio.run(telegram_invites.join(client, "hash"))
+
+    assert "недействительна" in str(exc.value)
+
+
+def test_the_listener_recognises_a_channel_without_a_name(db_session):
+    """У закрытого канала имени нет — входящий пост узнаётся по id."""
+    from app.services.telegram_event_listener import TelegramEventListenerService
+
+    private = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="joined", telegram_channel_id=777,
+    )
+    db_session.add(private)
+    db_session.commit()
+
+    assert TelegramEventListenerService._get_source(db_session, 777) is private
+    assert TelegramEventListenerService._get_source(db_session, 778) is None
+
+
+def test_a_public_channel_is_still_found_by_name(db_session, source):
+    from app.services.telegram_event_listener import TelegramEventListenerService
+
+    assert TelegramEventListenerService._get_source(db_session, "testsource") is source
+
+
+def test_the_reader_resolves_a_private_channel_by_id(db_session):
+    """Единственный ключ к закрытому каналу — id, записанный при вступлении."""
+    from app.services.telegram_reader import TelegramReaderService
+
+    private = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="joined", telegram_channel_id=777,
+    )
+    entity = _channel(777)
+
+    class _Client:
+        async def get_entity(self, peer):
+            assert getattr(peer, "channel_id", None) == 777
+            return entity
+
+    found = asyncio.run(TelegramReaderService()._resolve_entity(_Client(), private))
+    assert found is entity
+
+
+def test_a_channel_we_were_not_let_into_says_so(db_session):
+    from app.services.telegram_reader import TelegramReaderService
+
+    waiting = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="requested",
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        asyncio.run(TelegramReaderService()._resolve_entity(object(), waiting))
+
+    assert "заявка" in str(exc.value).lower()
+
+
+def test_resolving_by_name_remembers_the_id(db_session, source):
+    """Слушатель сверяет входящий пост по id, поэтому его надо однажды узнать."""
+    from app.services.telegram_reader import TelegramReaderService
+
+    class _Client:
+        async def get_entity(self, name):
+            return _channel(42, title="Публичный")
+
+    asyncio.run(TelegramReaderService()._resolve_entity(_Client(), source))
+    assert source.telegram_channel_id == 42

@@ -7,13 +7,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import ActionLog, RawPost, RawPostStatus, SourceChannel
-from app.services import manual_post
-from app.services.telegram_reader import TelegramReaderService
+from app.services import manual_post, telegram_invites
 from app.services.telegram_reader import TelegramReaderService
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, tpl
 
 router = APIRouter()
+
+#: Что сказать оператору про состояние закрытого канала.
+_JOIN_WORDS = {
+    telegram_invites.REQUESTED: "Заявка отправлена — ждём, пока её одобрят",
+    telegram_invites.JOINED: "Канал открыт: посты пойдут в ленту",
+}
 
 
 @router.get("/sources")
@@ -49,6 +54,12 @@ async def create_source(
     _: bool = Depends(require_auth),
 ):
     pid = current_project_id(request, db)
+    # Ссылка-приглашение — это закрытый канал: у него нет имени, и попасть
+    # в него можно только через заявку.
+    invite = telegram_invites.parse_invite(username_or_url)
+    if invite:
+        return await _add_private_source(request, db, title, invite, pid)
+
     username = TelegramReaderService._extract_username(username_or_url)
     db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True, project_id=pid))
     db.commit()
@@ -56,6 +67,53 @@ async def create_source(
     if listener:
         await listener.reload_sources()
     return RedirectResponse(url="/sources", status_code=302)
+
+
+async def _add_private_source(request: Request, db: Session, title: str, invite: str, pid: int | None):
+    """Заводит закрытый канал: сначала заявка, потом запись в базе.
+
+    Порядок именно такой: на недействительную ссылку источник заводить незачем,
+    а на несработавшую заявку — тем более, иначе в списке висела бы строка,
+    про которую ничего не известно.
+    """
+    try:
+        outcome = await TelegramReaderService().join_invite(invite)
+    except telegram_invites.InviteError as exc:
+        return RedirectResponse(url=f"/sources?error={urllib.parse.quote(str(exc))}", status_code=302)
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/sources?error={urllib.parse.quote(f'Заявку подать не удалось: {exc}')}",
+            status_code=302,
+        )
+
+    source = SourceChannel(
+        title=title or outcome.title or "Закрытый канал",
+        username=None,
+        source_type="telethon",
+        rss_url=None,
+        url=f"https://t.me/+{invite}",
+        invite_hash=invite,
+        join_state=outcome.state,
+        telegram_channel_id=outcome.channel_id,
+        enabled=True,
+        project_id=pid,
+    )
+    db.add(source)
+    db.flush()  # нужен id: строка журнала ссылается на источник
+    db.add(ActionLog(
+        action="source_join",
+        entity_type="SourceChannel",
+        entity_id=str(source.id),
+        message=f"«{source.title}»: {_JOIN_WORDS[outcome.state]}",
+    ))
+    db.commit()
+    listener = getattr(request.app.state, "event_listener", None)
+    if listener:
+        await listener.reload_sources()
+    return RedirectResponse(
+        url=f"/sources?ok={urllib.parse.quote(_JOIN_WORDS[outcome.state])}",
+        status_code=302,
+    )
 
 
 @router.post("/sources/{source_id}/edit")
@@ -68,6 +126,12 @@ async def edit_source(
     _: bool = Depends(require_auth),
 ):
     source = db.get(SourceChannel, source_id)
+    if source and source.invite_hash:
+        # У закрытого канала имени нет, и ссылка-приглашение не адрес канала:
+        # разбирать её как имя — значит сломать источник. Правим только название.
+        source.title = title
+        db.commit()
+        return RedirectResponse(url="/sources?ok=Источник+обновлён", status_code=302)
     if source:
         new_username = TelegramReaderService._extract_username(username_or_url)
         if new_username != source.username:
@@ -118,3 +182,39 @@ async def fetch_source(source_id: int, db: Session = Depends(get_db), _: bool = 
         db.add(ActionLog(action="fetch_error", entity_type="SourceChannel", entity_id=str(source.id), message=str(exc)))
         db.commit()
         return RedirectResponse(url=f"/sources?error={urllib.parse.quote(str(exc))}", status_code=302)
+
+
+@router.post("/sources/{source_id}/join-check")
+async def check_join(source_id: int, request: Request, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
+    """Одобрили ли заявку. Телеграм об одобрении не сообщает — спрашиваем сами."""
+    source = db.get(SourceChannel, source_id)
+    if not source or not source.invite_hash:
+        return RedirectResponse(url="/sources?error=Это+не+закрытый+канал", status_code=302)
+
+    try:
+        outcome = await TelegramReaderService().join_invite(source.invite_hash)
+    except telegram_invites.InviteError as exc:
+        return RedirectResponse(url=f"/sources?error={urllib.parse.quote(str(exc))}", status_code=302)
+    except Exception as exc:
+        return RedirectResponse(
+            url=f"/sources?error={urllib.parse.quote(f'Проверить не удалось: {exc}')}",
+            status_code=302,
+        )
+
+    source.join_state = outcome.state
+    if outcome.channel_id:
+        source.telegram_channel_id = outcome.channel_id
+    db.add(ActionLog(
+        action="source_join",
+        entity_type="SourceChannel",
+        entity_id=str(source.id),
+        message=f"«{source.title}»: {_JOIN_WORDS[outcome.state]}",
+    ))
+    db.commit()
+    listener = getattr(request.app.state, "event_listener", None)
+    if listener:
+        await listener.reload_sources()
+    return RedirectResponse(
+        url=f"/sources?ok={urllib.parse.quote(_JOIN_WORDS[outcome.state])}",
+        status_code=302,
+    )

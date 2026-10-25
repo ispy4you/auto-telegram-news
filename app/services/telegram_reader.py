@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
-from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto
+from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto, PeerChannel
 
 from app.config import get_settings
 from app.models import ActionLog, MediaItem, MediaOrigin, MediaType, RawPost, SourceChannel
@@ -22,6 +22,11 @@ _TELETHON_LOCK = asyncio.Lock()
 
 #: Как часто источник сообщает в журнал, что отбрасывает посты по возрасту.
 _SKIPPED_QUIET_PERIOD = timedelta(hours=1)
+
+
+def source_label(source: SourceChannel) -> str:
+    """Как назвать источник в журнале. У закрытого канала имени нет вовсе."""
+    return f"@{source.username}" if source.username else f"«{source.title}»"
 
 
 class TelegramReaderService:
@@ -82,13 +87,82 @@ class TelegramReaderService:
             cleaned = cleaned.split("/")[0]
         return cleaned.replace("@", "")
 
+    async def join_invite(self, invite_hash: str):
+        """Подать заявку в закрытый канал (или войти, если одобрения не нужно).
+
+        Клиент берётся так же, как при сборе: второй Telethon на одной сессии
+        Telegram считает поводом отозвать ключ.
+        """
+        from app.services import telegram_event_listener, telegram_invites
+
+        live = telegram_event_listener.active_client()
+        if live is not None:
+            return await asyncio.wait_for(telegram_invites.join(live, invite_hash), timeout=60)
+        return await asyncio.wait_for(self._join_with_own_client(invite_hash), timeout=60)
+
+    async def _join_with_own_client(self, invite_hash: str):
+        from app.services import telegram_invites
+
+        async with _TELETHON_LOCK:
+            client = self._client()
+            await client.connect()
+            try:
+                if not await client.is_user_authorized():
+                    raise RuntimeError(
+                        "Сессия Telethon не авторизована. Войдите в Telegram в админке."
+                    )
+                return await telegram_invites.join(client, invite_hash)
+            finally:
+                await client.disconnect()
+
+    async def _resolve_entity(self, client: TelegramClient, source: SourceChannel):
+        """Канал по имени или по внутреннему id.
+
+        У закрытого канала имени нет вообще, поэтому единственный ключ к нему —
+        id, который мы записали при вступлении.
+        """
+        if source.username:
+            entity = await client.get_entity(self._extract_username(source.username))
+        elif source.telegram_channel_id:
+            entity = await self._entity_by_id(client, source.telegram_channel_id)
+        else:
+            raise RuntimeError(
+                f"«{source.title}»: канал закрыт и заявка ещё не одобрена — читать нечего."
+            )
+
+        # id запоминаем и для публичных каналов: слушатель узнаёт входящий пост
+        # по нему, а у закрытого канала сверять больше нечего.
+        found = getattr(entity, "id", None)
+        if found and source.telegram_channel_id != found:
+            source.telegram_channel_id = found
+        return entity
+
+    @staticmethod
+    async def _entity_by_id(client: TelegramClient, channel_id: int):
+        """Канал по id. Telethon знает его, только если видел в этой сессии."""
+        try:
+            return await client.get_entity(PeerChannel(channel_id))
+        except (ValueError, TypeError):
+            # Кэш сессии пуст — например, после входа заново. Канал всё ещё наш,
+            # просто Telethon о нём не помнит: ищем в списке диалогов.
+            async for dialog in client.iter_dialogs():
+                if getattr(dialog.entity, "id", None) == channel_id:
+                    return dialog.entity
+            raise RuntimeError(
+                "Канал недоступен: нас в нём нет. Если заявку ещё не одобрили — "
+                "ждите, если выгнали — источник придётся завести заново."
+            ) from None
+
     async def fetch_source(self, db: Session, source: SourceChannel, limit: int | None = None) -> int:
         if not source.enabled or source.source_type != "telethon":
             return 0
         if limit is None:
             limit = settings_registry.get("default_lookback_limit", db)
-        if not source.username:
-            raise ValueError(f"Source {source.id} не имеет username для Telethon")
+        if not source.username and not source.telegram_channel_id:
+            raise ValueError(
+                f"«{source.title}»: канал ещё не открыт. Закрытый канал читается "
+                "только после одобрения заявки — проверьте её на странице источников."
+            )
 
         # Второй Telethon-клиент на одной сессии Telegram считает поводом
         # отозвать ключ. Если слушатель уже держит соединение — опрашиваем его
@@ -112,7 +186,7 @@ class TelegramReaderService:
             )
         except asyncio.TimeoutError:
             raise RuntimeError(
-                f"Timeout при подключении к Telegram для @{source.username}. "
+                f"Timeout при подключении к Telegram для {source_label(source)}. "
                 "Возможные причины: нет доступа к Telegram, сессия устарела, "
                 "или сервер недоступен. Проверьте сеть и войдите в Telegram "
                 "заново в админке."
@@ -168,7 +242,7 @@ class TelegramReaderService:
         albums: dict[int, list] = defaultdict(list)
         standalone_messages = []
 
-        entity = await client.get_entity(source.username)
+        entity = await self._resolve_entity(client, source)
         if source.last_message_id:
             # reverse=True — берём самые СТАРЫЕ из непрочитанных, а не самые
             # свежие. Разница видна после простоя: если за это время вышло
@@ -249,7 +323,7 @@ class TelegramReaderService:
                 action="fetch_post_telethon",
                 entity_type="SourceChannel",
                 entity_id=str(source.id),
-                message=f"Собрано {new_count} новых постов из @{source.username}",
+                message=f"Собрано {new_count} новых постов из {source_label(source)}",
             ))
         if skipped_old:
             self._note_skipped_old(db, source, skipped_old)
@@ -287,7 +361,7 @@ class TelegramReaderService:
             entity_type="SourceChannel",
             entity_id=str(source.id),
             message=(
-                f"@{source.username}: пропущено {skipped_old} постов старше "
+                f"{source_label(source)}: пропущено {skipped_old} постов старше "
                 f"{hours:g} ч. Отсечка — настройка «Макс. возраст поста»."
             ),
         ))
@@ -306,7 +380,7 @@ class TelegramReaderService:
         if not missing:
             return 0
         source = raw_post.source
-        if not source or not source.username:
+        if not source or not (source.username or source.telegram_channel_id):
             return 0
 
         # Второй Telethon-клиент на той же сессии проект не поднимает намеренно:
@@ -342,7 +416,7 @@ class TelegramReaderService:
                     "Сессия Telethon не авторизована или устарела. "
                     "Войдите в Telegram заново в админке."
                 )
-            entity = await client.get_entity(self._extract_username(source.username))
+            entity = await self._resolve_entity(client, source)
             ids = sorted({item.telegram_message_id for item in missing})
             messages = [m for m in await client.get_messages(entity, ids=ids) if m is not None]
             if not messages:

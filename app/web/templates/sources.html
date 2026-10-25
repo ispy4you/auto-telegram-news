@@ -20,7 +20,8 @@
       </div>
       <div class="col-md-5">
         <label class="form-label small text-muted mb-1">Telegram-канал</label>
-        <input class="form-control" name="username_or_url" placeholder="@channel или https://t.me/channel" required>
+        <input class="form-control" name="username_or_url" placeholder="@channel, https://t.me/channel или ссылка-приглашение t.me/+…" required>
+        <div class="form-text">Закрытый канал добавляется ссылкой-приглашением: панель подаст заявку, читать его можно будет после одобрения.</div>
       </div>
       <div class="col-auto">
         <button class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
@@ -49,7 +50,11 @@
           <td class="ps-3">
             <div class="fw-semibold">{{ s.title }}</div>
             <div class="text-muted small">
+              {% if s.username %}
               <a href="https://t.me/{{ s.username }}" target="_blank" class="text-muted text-decoration-none">@{{ s.username }}</a>
+              {% else %}
+              <a href="{{ s.url }}" target="_blank" class="text-muted text-decoration-none"><i class="bi bi-lock me-1"></i>закрытый канал</a>
+              {% endif %}
             </div>
           </td>
           <td>
@@ -57,6 +62,13 @@
               <span class="text-success small"><i class="bi bi-circle-fill me-1" style="font-size:.5rem;vertical-align:middle"></i>Активен</span>
             {% else %}
               <span class="text-muted small"><i class="bi bi-circle me-1" style="font-size:.5rem;vertical-align:middle"></i>Отключён</span>
+            {% endif %}
+            {% if s.join_state == 'requested' %}
+            <div class="text-warning small" title="Пока заявку не одобрят, посты читать неоткуда">
+              <i class="bi bi-hourglass-split me-1"></i>Заявка на рассмотрении
+            </div>
+            {% elif s.join_state == 'joined' %}
+            <div class="text-secondary small"><i class="bi bi-unlock me-1"></i>Заявка одобрена</div>
             {% endif %}
           </td>
           <td class="text-end text-muted small">{{ post_totals.get(s.id, 0) }}</td>
@@ -70,10 +82,19 @@
           </td>
           <td class="text-end pe-3">
             <div class="d-flex gap-1 justify-content-end">
+              {% if s.join_state == 'requested' %}
+              <form method="post" action="/sources/{{ s.id }}/join-check">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button class="btn btn-sm btn-outline-warning text-nowrap" title="Телеграм не сообщает об одобрении — проверяем сами">
+                  <i class="bi bi-hourglass me-1"></i>Заявка
+                </button>
+              </form>
+              {% else %}
               <form method="post" action="/sources/{{ s.id }}/fetch">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <button class="btn btn-sm btn-outline-primary" title="Собрать посты"><i class="bi bi-cloud-download"></i></button>
               </form>
+              {% endif %}
               <button class="btn btn-sm btn-outline-secondary" type="button"
                 data-bs-toggle="collapse" data-bs-target="#edit-src-{{ s.id }}" title="Редактировать">
                 <i class="bi bi-pencil"></i>
@@ -101,7 +122,14 @@
               </div>
               <div class="col-md-5">
                 <label class="form-label small text-muted mb-1">Telegram-канал</label>
+                {% if s.invite_hash %}
+                {# Закрытый канал сменить нельзя: ссылка-приглашение не адрес, и
+                   заявка подаётся один раз. Меняется только название. #}
+                <input class="form-control form-control-sm" value="закрытый канал по приглашению" disabled>
+                <input type="hidden" name="username_or_url" value="{{ s.url }}">
+                {% else %}
                 <input class="form-control form-control-sm" name="username_or_url" value="{{ s.username }}" required>
+                {% endif %}
               </div>
               <div class="col-auto">
                 <button class="btn btn-sm btn-primary">Сохранить</button>
