@@ -43,7 +43,7 @@ def test_the_card_carries_the_whole_reason(logged_in, db_session, source):
     page = logged_in.get("/posts").text
 
     assert LONG_REASON in page, "в карточке причина обрезана — разворачивать нечего"
-    assert "reason-more" in page, "нет кнопки «подробнее» у длинной причины"
+    assert "подробнее</button>" in page, "нет кнопки «подробнее» у длинной причины"
 
 
 def test_a_short_reason_gets_no_button(logged_in, db_session, source):
@@ -52,7 +52,8 @@ def test_a_short_reason_gets_no_button(logged_in, db_session, source):
     page = logged_in.get("/posts").text
 
     assert "Дубль вчерашнего поста." in page
-    assert "reason-more" not in page, "короткую причину разворачивать незачем"
+    # Имя класса есть и в обработчике из base.html — ищем саму кнопку.
+    assert "подробнее</button>" not in page, "короткую причину разворачивать незачем"
 
 
 def test_the_post_page_shows_the_reason_in_full(logged_in, db_session, source):
