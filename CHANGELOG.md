@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.7.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.6.1...v1.7.0) (2026-10-25)
+
+
+### Features
+
+* закрытые каналы как источник ([#62](https://github.com/ispy4you/auto-telegram-news/issues/62)) ([ba226db](https://github.com/ispy4you/auto-telegram-news/commit/ba226dbf5eb8b025b8ede519b91e752eb2ec9627))
+* медиа под спойлером Telegram ([#61](https://github.com/ispy4you/auto-telegram-news/issues/61)) ([cd5e303](https://github.com/ispy4you/auto-telegram-news/commit/cd5e303ae96eb4713f14a176c00bfb9edac85d83))
+
+
+### Bug Fixes
+
+* ошибка сервера получает код, причину и строку в журнале ([#59](https://github.com/ispy4you/auto-telegram-news/issues/59)) ([19e09db](https://github.com/ispy4you/auto-telegram-news/commit/19e09db97c3bf4c756e7c86dce200675fa7f21a2))
+* причина отказа видна целиком ([#60](https://github.com/ispy4you/auto-telegram-news/issues/60)) ([e1fd02f](https://github.com/ispy4you/auto-telegram-news/commit/e1fd02fd8ee65b7cda19b08bb392fcf85e538ee0))
+
 ## [1.6.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.6.0...v1.6.1) (2026-10-15)
 
 
