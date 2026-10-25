@@ -199,12 +199,22 @@ async def check_join(source_id: int, request: Request, db: Session = Depends(get
         return RedirectResponse(url="/sources?error=Это+не+закрытый+канал", status_code=302)
 
     try:
-        outcome = await TelegramReaderService().join_invite(source.invite_hash)
+        # Именно проверка, а не повторная заявка: нажатий на кнопку бывает
+        # много, а повторные заявки Telegram считает флудом и запрещает попытки.
+        outcome = await TelegramReaderService().check_invite(source.invite_hash)
     except telegram_invites.InviteError as exc:
         return RedirectResponse(url=f"/sources?error={urllib.parse.quote(str(exc))}", status_code=302)
     except Exception as exc:
         return RedirectResponse(
             url=f"/sources?error={urllib.parse.quote(f'Проверить не удалось: {exc}')}",
+            status_code=302,
+        )
+
+    if outcome is None:
+        # Снаружи — значит, заявка всё ещё ждёт. Когда её одобрят, Telegram
+        # не сообщит: проверять придётся так же, нажатием.
+        return RedirectResponse(
+            url=f"/sources?ok={urllib.parse.quote('Заявку пока не одобрили — канал по-прежнему закрыт')}",
             status_code=302,
         )
 

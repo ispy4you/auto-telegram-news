@@ -233,3 +233,56 @@ def test_being_kicked_out_is_told_apart_from_a_cold_cache():
         asyncio.run(TelegramReaderService()._entity_by_id(_Client(), 777))
 
     assert "исключили" in str(exc.value)
+
+
+def test_checking_the_request_does_not_send_it_again(logged_in, db_session, csrf, monkeypatch):
+    """Кнопка спрашивает «впустили ли», а не подаёт заявку заново."""
+    from app.services.telegram_reader import TelegramReaderService
+
+    waiting = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="requested", project_id=1,
+    )
+    db_session.add(waiting)
+    db_session.commit()
+
+    async def _no_joining(self, invite_hash):
+        raise AssertionError("повторная заявка — это флуд, Telegram за него наказывает")
+
+    async def _still_outside(self, invite_hash):
+        return None
+
+    monkeypatch.setattr(TelegramReaderService, "join_invite", _no_joining)
+    monkeypatch.setattr(TelegramReaderService, "check_invite", _still_outside)
+
+    answer = logged_in.post(f"/sources/{waiting.id}/join-check", data={
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    db_session.refresh(waiting)
+    assert waiting.join_state == "requested", "состояние не меняется, пока не впустили"
+    assert "ok=" in answer.headers["location"], "это не ошибка, а ответ «пока нет»"
+
+
+def test_an_approved_request_opens_the_channel(logged_in, db_session, csrf, monkeypatch):
+    from app.services.telegram_invites import InviteOutcome
+    from app.services.telegram_reader import TelegramReaderService
+
+    waiting = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="requested", project_id=1,
+    )
+    db_session.add(waiting)
+    db_session.commit()
+
+    async def _let_in(self, invite_hash):
+        return InviteOutcome("joined", "Закрытый", 777)
+
+    monkeypatch.setattr(TelegramReaderService, "check_invite", _let_in)
+
+    logged_in.post(f"/sources/{waiting.id}/join-check", data={
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    db_session.refresh(waiting)
+    assert (waiting.join_state, waiting.telegram_channel_id) == ("joined", 777)

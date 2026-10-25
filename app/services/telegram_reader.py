@@ -103,21 +103,33 @@ class TelegramReaderService:
         return cleaned.replace("@", "")
 
     async def join_invite(self, invite_hash: str):
-        """Подать заявку в закрытый канал (или войти, если одобрения не нужно).
+        """Подать заявку в закрытый канал (или войти, если одобрения не нужно)."""
+        from app.services import telegram_invites
 
-        Клиент берётся так же, как при сборе: второй Telethon на одной сессии
-        Telegram считает поводом отозвать ключ.
+        return await self._invite_call(telegram_invites.join, invite_hash)
+
+    async def check_invite(self, invite_hash: str):
+        """Впустили ли нас уже. None — всё ещё снаружи.
+
+        Отдельно от join_invite намеренно: проверка ничего не подаёт заново.
+        Повторная заявка каждый раз, когда оператор нажимает кнопку, довела бы
+        до запрета на попытки — Telegram считает это флудом.
         """
-        from app.services import telegram_event_listener, telegram_invites
+        from app.services import telegram_invites
+
+        return await self._invite_call(telegram_invites.check, invite_hash)
+
+    async def _invite_call(self, action, invite_hash: str):
+        """Разговор про приглашение идёт тем же клиентом, что и сбор: второй
+        Telethon на одной сессии Telegram считает поводом отозвать ключ."""
+        from app.services import telegram_event_listener
 
         live = telegram_event_listener.active_client()
         if live is not None:
-            return await asyncio.wait_for(telegram_invites.join(live, invite_hash), timeout=60)
-        return await asyncio.wait_for(self._join_with_own_client(invite_hash), timeout=60)
+            return await asyncio.wait_for(action(live, invite_hash), timeout=60)
+        return await asyncio.wait_for(self._invite_with_own_client(action, invite_hash), timeout=60)
 
-    async def _join_with_own_client(self, invite_hash: str):
-        from app.services import telegram_invites
-
+    async def _invite_with_own_client(self, action, invite_hash: str):
         async with _TELETHON_LOCK:
             client = self._client()
             await client.connect()
@@ -126,7 +138,7 @@ class TelegramReaderService:
                     raise RuntimeError(
                         "Сессия Telethon не авторизована. Войдите в Telegram в админке."
                     )
-                return await telegram_invites.join(client, invite_hash)
+                return await action(client, invite_hash)
             finally:
                 await client.disconnect()
 
