@@ -99,9 +99,7 @@
           </span>
           {% endif %}
           {% if p.status in ('rejected', 'duplicate') and p.ai_skip_reason %}
-          <span class="badge bg-light text-danger border" title="{{ p.ai_skip_reason }}" style="cursor:help;max-width:120px;overflow:hidden;text-overflow:ellipsis">
-            <i class="bi bi-info-circle me-1"></i>AI
-          </span>
+          <span class="badge bg-light text-danger border"><i class="bi bi-info-circle me-1"></i>AI</span>
           {% endif %}
         </div>
         <small class="text-muted text-nowrap">#{{ p.id }} · {{ p.source.title if p.source else '—' }}</small>
@@ -112,8 +110,14 @@
       </p>
 
       {% if p.status in ('rejected', 'duplicate') and p.ai_skip_reason %}
-      <div class="text-danger" style="font-size:.78rem;line-height:1.4">
-        <i class="bi bi-robot me-1"></i>{{ p.ai_skip_reason[:120] }}{% if p.ai_skip_reason|length > 120 %}…{% endif %}
+      {# Причина целиком: в карточке её сжимает до трёх строк CSS, кнопка их разжимает.
+         Раньше текст резался здесь, и полностью он был только во всплывающей
+         подсказке — на телефоне недоступной. #}
+      <div class="text-danger reason" style="font-size:.78rem;line-height:1.4">
+        <span class="reason-text"><i class="bi bi-robot me-1"></i>{{ p.ai_skip_reason }}</span>
+        {% if p.ai_skip_reason|length > 150 %}
+        <button type="button" class="btn btn-link btn-sm p-0 align-baseline text-danger reason-more" style="font-size:.78rem">подробнее</button>
+        {% endif %}
       </div>
       {% endif %}
 

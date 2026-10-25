@@ -5,6 +5,7 @@ from pathlib import Path
 
 from aiogram import Bot
 from aiogram.types import FSInputFile, InputMediaPhoto, InputMediaVideo
+from aiogram.utils.token import TokenValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -13,6 +14,16 @@ from app.services import media_restore, message_entities, post_lifecycle, settin
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, TargetChannel
 
 logger = logging.getLogger(__name__)
+
+
+class BotTokenError(RuntimeError):
+    """Токен бота не задан или не проходит проверку формата.
+
+    Отдельный тип, потому что это единственная ошибка публикации, которую
+    оператор может исправить сам, не читая лог: текст пишется для него и
+    показывается в панели как есть.
+    """
+
 
 
 def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
@@ -45,12 +56,23 @@ class TelegramPublisherService:
     async def _get_bot(self, db: Session | None = None) -> Bot:
         token = settings_registry.get("telegram_bot_token", db)
         if not token:
-            raise RuntimeError("TELEGRAM_BOT_TOKEN не задан ни в Settings, ни в .env")
+            raise BotTokenError(
+                "Токен бота не задан. Настройки → Telegram-бот, либо TELEGRAM_BOT_TOKEN в окружении."
+            )
         if self._bot is not None and self._bot_token != token:
             await self._bot.session.close()
             self._bot = None
         if self._bot is None:
-            self._bot = Bot(token)
+            try:
+                self._bot = Bot(token)
+            except TokenValidationError:
+                # aiogram проверяет формат, не спрашивая Telegram: «123456:буквы».
+                # Без этой ветки панель отдавала пятисотку без единого слова,
+                # а причина была в лишнем пробеле или обрезанном токене.
+                raise BotTokenError(
+                    "Токен бота не похож на настоящий: Telegram такой формат не принимает. "
+                    "Скопируйте его из @BotFather целиком, без пробелов."
+                ) from None
             self._bot_token = token
         return self._bot
 
@@ -60,8 +82,10 @@ class TelegramPublisherService:
             self._bot = None
 
     async def test_target(self, chat_id: str, db: Session | None = None) -> tuple[bool, str]:
-        bot = await self._get_bot(db)
         try:
+            # Получение бота тоже внутри try: при неверном токене проверка
+            # должна отвечать «вот что не так», а не падать пятисоткой.
+            bot = await self._get_bot(db)
             me = await bot.get_me()
             member = await bot.get_chat_member(chat_id=chat_id, user_id=me.id)
             ok = member.status in {"administrator", "creator"}
@@ -158,13 +182,15 @@ class TelegramPublisherService:
                 db.commit()
                 return
 
-        bot = await self._get_bot(db)
         job = self._claim_job(db, generated_post_id, target_channel_id, PublishJobStatus.RUNNING.value)
         job.attempts += 1
         job.scheduled_at = None
         db.flush()
 
         try:
+            # Внутри try, чтобы неверный токен попал в причину отказа задачи и
+            # в журнал — раньше он улетал наружу мимо отметки publish_failed.
+            bot = await self._get_bot(db)
             # Спойлер — свойство канала: Telegram показывает медиа размытым и
             # открывает его по нажатию. Файл уходит нетронутым — размывает его
             # сам Telegram, поэтому на диске и в исходнике он остаётся целым.
