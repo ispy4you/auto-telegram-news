@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import ActionLog, SourceChannel
+from app.services.telegram_reader import source_label
 
 logger = logging.getLogger(__name__)
 
@@ -47,8 +48,11 @@ class TelegramEventListenerService:
         self._needs_login = False
         self._started = False  # True с момента start() — не сбрасывается при переподключении
         self._db_factory = None
-        self._source_usernames: set[str] = set()  # lowercase usernames
-        # Буфер для альбомов (grouped_id -> list of (username, msg))
+        # Ключи отслеживаемых каналов: имя в нижнем регистре и внутренний id.
+        # Два вида ключей нужны потому, что у закрытого канала имени нет вовсе,
+        # а у публичного id появляется только после первого обращения к нему.
+        self._source_keys: set = set()
+        # Буфер для альбомов (grouped_id -> list of (ключ канала, msg))
         self._album_buffer: dict[int, list] = defaultdict(list)
         self._album_tasks: dict[int, asyncio.Task] = {}
         self._noted_at: dict[str, datetime] = {}  # сообщение -> когда записали
@@ -130,8 +134,10 @@ class TelegramEventListenerService:
                     SourceChannel.source_type == "telethon",
                 )
             ).all()
-            self._source_usernames = {s.username.lower() for s in sources if s.username}
-        logger.debug("Event listener: %d каналов в мониторинге", len(self._source_usernames))
+            keys: set = {s.username.lower() for s in sources if s.username}
+            keys |= {s.telegram_channel_id for s in sources if s.telegram_channel_id}
+            self._source_keys = keys
+        logger.debug("Event listener: %d каналов в мониторинге", len(self._source_keys))
 
     # ------------------------------------------------------------------
     # Внутренние методы
@@ -300,10 +306,10 @@ class TelegramEventListenerService:
         await self.reload_sources()
         self._active = True
         self._forget_failure()
-        logger.info("Event listener активен, слушает %d каналов", len(self._source_usernames))
+        logger.info("Event listener активен, слушает %d каналов", len(self._source_keys))
         self._note(
             "listener_connected",
-            f"Слушатель Telegram подключён, каналов в мониторинге: {len(self._source_usernames)}.",
+            f"Слушатель Telegram подключён, каналов в мониторинге: {len(self._source_keys)}.",
         )
 
         await self._catchup(client)
@@ -316,14 +322,21 @@ class TelegramEventListenerService:
         async def _on_new_message(event):
             try:
                 chat = await event.get_chat()
-                username = (getattr(chat, "username", None) or "").lower()
-                if username not in self._source_usernames:
+                # id важнее имени: у закрытого канала имени нет, а у публичного
+                # имя могут сменить, и тогда по нему мы его уже не узнаем.
+                key = next(
+                    (k for k in (getattr(chat, "id", None),
+                                 (getattr(chat, "username", None) or "").lower())
+                     if k and k in self._source_keys),
+                    None,
+                )
+                if key is None:
                     return
                 msg = event.message
                 if msg.grouped_id:
-                    await self._buffer_album(username, msg, client)
+                    await self._buffer_album(key, msg, client)
                 else:
-                    await self._save_single(username, msg, client)
+                    await self._save_single(key, msg, client)
             except IntegrityError:
                 # Тот же пост уже записал опрос (uq_source_message). Это гонка
                 # двух здоровых путей сбора, а не потеря поста — тревожить
@@ -357,14 +370,14 @@ class TelegramEventListenerService:
                         SourceChannel.enabled.is_(True),
                         SourceChannel.source_type == "telethon",
                     )
-                ).all() if s.username
+                ).all() if s.username or s.telegram_channel_id
             ]
 
         # Каждый источник в своей сессии — короткий write-лок вместо одного долгого
         for source_id in source_ids:
             with self._db_factory() as db:
                 source = db.get(SourceChannel, source_id)
-                if not source or not source.username:
+                if not source or not (source.username or source.telegram_channel_id):
                     continue
                 try:
                     pending, last_msg_id, skipped_old = await self._reader._collect_pending(
@@ -374,14 +387,14 @@ class TelegramEventListenerService:
                         db, source, pending, last_msg_id, skipped_old
                     )
                     if count:
-                        logger.info("Catch-up @%s: %d новых постов", source.username, count)
+                        logger.info("Catch-up %s: %d новых постов", source_label(source), count)
                 except IntegrityError:
                     # Опрос по таймеру успел записать тот же пост. Ничего не
                     # потеряно, и оператору такое показывать незачем.
                     db.rollback()
-                    logger.debug("Catch-up @%s: пост уже записан опросом", source.username)
+                    logger.debug("Catch-up %s: пост уже записан опросом", source_label(source))
                 except Exception as exc:
-                    logger.warning("Catch-up ошибка для @%s: %s", source.username, exc)
+                    logger.warning("Catch-up ошибка для %s: %s", source_label(source), exc)
                     try:
                         db.rollback()
                         db.add(ActionLog(
@@ -405,10 +418,10 @@ class TelegramEventListenerService:
             except Exception:
                 pass
 
-    async def _buffer_album(self, username: str, msg, client) -> None:
+    async def _buffer_album(self, key, msg, client) -> None:
         """Буферизует сообщения альбома и сохраняет весь альбом через 1.5с после последнего."""
         gid = msg.grouped_id
-        self._album_buffer[gid].append((username, msg))
+        self._album_buffer[gid].append((key, msg))
 
         # Отменяем предыдущий таймер сброса для этого альбома
         existing = self._album_tasks.get(gid)
@@ -424,11 +437,11 @@ class TelegramEventListenerService:
 
         self._album_tasks[gid] = asyncio.create_task(_flush())
 
-    async def _save_single(self, username: str, msg, client) -> None:
+    async def _save_single(self, key, msg, client) -> None:
         if not self._db_factory:
             return
         with self._db_factory() as db:
-            source = self._get_source(db, username)
+            source = self._get_source(db, key)
             if not source:
                 return
             media_files = await self._reader._download_media_list(source, msg.id, [msg], client)
@@ -440,20 +453,20 @@ class TelegramEventListenerService:
                     action="fetch_post_telethon",
                     entity_type="RawPost",
                     entity_id=str(post.id),
-                    message=f"Новый пост из @{username}",
+                    message=f"Новый пост из {source_label(source)}",
                 ))
                 db.commit()
-                logger.debug("Event: пост %d из @%s", msg.id, username)
+                logger.debug("Event: пост %d из %s", msg.id, source_label(source))
 
     async def _save_album(self, entries: list, client) -> None:
         if not entries or not self._db_factory:
             return
-        username = entries[0][0]
+        key = entries[0][0]
         msgs = sorted([m for _, m in entries], key=lambda m: m.id)
         anchor = msgs[0]
 
         with self._db_factory() as db:
-            source = self._get_source(db, username)
+            source = self._get_source(db, key)
             if not source:
                 return
             # Проверка дубля для всего альбома
@@ -473,20 +486,26 @@ class TelegramEventListenerService:
                     action="fetch_post_telethon",
                     entity_type="RawPost",
                     entity_id=str(post.id),
-                    message=f"Новый альбом из @{username} ({len(media_files)} медиа)",
+                    message=f"Новый альбом из {source_label(source)} ({len(media_files)} медиа)",
                 ))
                 db.commit()
                 logger.debug(
-                    "Event: альбом %d из @%s (%d медиа)",
-                    anchor.grouped_id, username, len(media_files),
+                    "Event: альбом %d из %s (%d медиа)",
+                    anchor.grouped_id, source_label(source), len(media_files),
                 )
 
     @staticmethod
-    def _get_source(db, username_lower: str):
+    def _get_source(db, key):
+        """Источник по ключу входящего поста: по id канала или по имени."""
         from sqlalchemy import func
+        match = (
+            SourceChannel.telegram_channel_id == key
+            if isinstance(key, int)
+            else func.lower(SourceChannel.username) == key
+        )
         return db.scalar(
             select(SourceChannel).where(
-                func.lower(SourceChannel.username) == username_lower,
+                match,
                 SourceChannel.enabled.is_(True),
                 SourceChannel.source_type == "telethon",
             )

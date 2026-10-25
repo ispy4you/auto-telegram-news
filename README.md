@@ -97,6 +97,9 @@ flowchart TD
 ### Content collection
 - Reads posts from any number of public Telegram channels via a **Telethon user session** —
   no need to be an admin of the source channel.
+- **Private channels**: add a source by its invite link (`t.me/+…`); the panel sends a join request
+  and shows whether it was approved. Once approved, the channel is read by its internal id —
+  a private channel has no username.
 - **Real-time mode**: a persistent Telethon connection with a `NewMessage` handler — new posts are
   saved instantly, without waiting for the next scheduler tick.
 - **Automatic catch-up**: on startup (or reconnect), missed messages per channel are backfilled.
@@ -522,7 +525,8 @@ front as a reverse proxy with HTTPS.
 ## Using the admin panel
 
 1. **Projects** → create separate projects if needed; switch via the header menu.
-2. **Sources** → add source channels by `@username` or `https://t.me/...`.
+2. **Sources** → add source channels by `@username` or `https://t.me/...`; for a private channel
+   paste its invite link `t.me/+…` (the panel sends a join request; reading starts once approved).
 3. **Targets** → add target channels with their `chat_id`, verify with the `Test` button, set
    publish schedules.
 4. **Routes** → configure which source feeds which target channel.

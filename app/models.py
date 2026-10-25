@@ -70,7 +70,16 @@ class SourceChannel(Base):
     username: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     source_type: Mapped[str] = mapped_column(String(32), default="telethon")
     rss_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    #: Внутренний id канала в Telegram. У закрытого канала имени нет вовсе, и
+    #: читать его можно только по id, поэтому он заполняется и для публичных:
+    #: один путь на всех вместо двух похожих.
     telegram_channel_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    #: Хвост ссылки-приглашения закрытого канала (t.me/+XXXX). Хранится, чтобы
+    #: повторить попытку: заявку одобряют не сразу, а ссылка нужна каждый раз.
+    invite_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    #: «open» — публичный канал, вступать некуда; «requested» — заявка подана и
+    #: ждёт одобрения; «joined» — нас впустили и посты читаются.
+    join_state: Mapped[str] = mapped_column(String(16), default="open")
     url: Mapped[str] = mapped_column(String(512))
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
