@@ -343,3 +343,38 @@ def test_an_empty_address_is_refused(logged_in, db_session, csrf):
 
     assert "error=" in answer.headers["location"]
     assert db_session.query(SourceChannel).filter_by(username="").count() == 0
+
+
+def test_the_listener_counts_channels_not_keys(db_session):
+    """У канала два ключа — имя и id. В счётчике для человека нужен канал."""
+    from app.services.telegram_event_listener import TelegramEventListenerService
+
+    db_session.add_all([
+        SourceChannel(title="Публичный", username="news", url="https://t.me/news",
+                      telegram_channel_id=11),
+        SourceChannel(title="Закрытый", username=None, url="https://t.me/+hash",
+                      invite_hash="hash", join_state="joined", telegram_channel_id=22),
+        SourceChannel(title="Ждём", username=None, url="https://t.me/+other",
+                      invite_hash="other", join_state="requested"),
+    ])
+    db_session.commit()
+
+    listener = TelegramEventListenerService()
+    listener._db_factory = lambda: _Session(db_session)
+    asyncio.run(listener.reload_sources())
+
+    assert listener._watched_count == 2, "ждущий одобрения канал слушать нечем"
+    assert listener._source_keys == {"news", 11, 22}
+
+
+class _Session:
+    """Сессия из фикстуры, которую можно открыть как контекст."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __enter__(self):
+        return self._db
+
+    def __exit__(self, *exc):
+        return False
