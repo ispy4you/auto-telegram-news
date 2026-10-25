@@ -125,9 +125,14 @@ class TelegramReaderService:
             entity = await client.get_entity(self._extract_username(source.username))
         elif source.telegram_channel_id:
             entity = await self._entity_by_id(client, source.telegram_channel_id)
+        elif source.join_state == "requested":
+            raise RuntimeError(
+                f"«{source.title}»: заявку ещё не одобрили — читать нечего."
+            )
         else:
             raise RuntimeError(
-                f"«{source.title}»: канал закрыт и заявка ещё не одобрена — читать нечего."
+                f"«{source.title}»: канал не определён. Нажмите «Заявка» на странице "
+                "источников — панель перепроверит доступ."
             )
 
         # id запоминаем и для публичных каналов: слушатель узнаёт входящий пост
@@ -155,6 +160,10 @@ class TelegramReaderService:
 
     async def fetch_source(self, db: Session, source: SourceChannel, limit: int | None = None) -> int:
         if not source.enabled or source.source_type != "telethon":
+            return 0
+        if source.join_state == "requested":
+            # Ждать одобрения — нормальное состояние, а не сбой: иначе каждый
+            # опрос записывал бы источнику ошибку, и журнал читать перестали бы.
             return 0
         if limit is None:
             limit = settings_registry.get("default_lookback_limit", db)
@@ -293,7 +302,7 @@ class TelegramReaderService:
             pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
 
         if skipped_old:
-            logger.info("Пропущено %d старых постов (старше отсечки) у @%s", skipped_old, source.username)
+            logger.info("Пропущено %d старых постов (старше отсечки) у %s", skipped_old, source_label(source))
 
         last_msg_id = max((m.id for m in messages), default=None)
         return pending, last_msg_id, skipped_old

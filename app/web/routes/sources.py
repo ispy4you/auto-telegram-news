@@ -76,6 +76,13 @@ async def _add_private_source(request: Request, db: Session, title: str, invite:
     а на несработавшую заявку — тем более, иначе в списке висела бы строка,
     про которую ничего не известно.
     """
+    already = db.scalar(select(SourceChannel).where(SourceChannel.invite_hash == invite))
+    if already is not None:
+        return RedirectResponse(
+            url=f"/sources?error={urllib.parse.quote(f'Этот канал уже добавлен: «{already.title}»')}",
+            status_code=302,
+        )
+
     try:
         outcome = await TelegramReaderService().join_invite(invite)
     except telegram_invites.InviteError as exc:

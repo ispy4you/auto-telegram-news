@@ -10,7 +10,7 @@ from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, R
 from app.services import post_lifecycle, post_routing, prompts, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
-from app.services.telegram_reader import TelegramReaderService
+from app.services.telegram_reader import TelegramReaderService, source_label
 from app.services.telegram_publisher import TelegramPublisherService
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class NewsPipelineService:
                 # в базе, остальные приедут на следующем прогоне — last_message_id
                 # не сдвинулся. Оператору такое показывать незачем.
                 db.rollback()
-                logger.debug("Пост из @%s уже записан слушателем", source.username)
+                logger.debug("Пост из %s уже записан слушателем", source_label(source))
             except Exception as exc:
                 msg = str(exc)
                 if "Constructor ID" in msg and "TLObject" in msg:
@@ -84,7 +84,7 @@ class NewsPipelineService:
             action="fetch_recovered",
             entity_type="SourceChannel",
             entity_id=str(source.id),
-            message=f"@{source.username} снова отвечает, сбор восстановлен.",
+            message=f"{source_label(source)} снова отвечает, сбор восстановлен.",
         ))
         db.commit()
 

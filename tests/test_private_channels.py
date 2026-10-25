@@ -171,3 +171,33 @@ def test_resolving_by_name_remembers_the_id(db_session, source):
 
     asyncio.run(TelegramReaderService()._resolve_entity(_Client(), source))
     assert source.telegram_channel_id == 42
+
+
+def test_waiting_for_approval_is_not_a_collection_error(db_session):
+    """Опрос идёт каждые две минуты: заявка в ожидании не должна копить ошибки."""
+    from app.services.telegram_reader import TelegramReaderService
+
+    waiting = SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="requested",
+    )
+    db_session.add(waiting)
+    db_session.commit()
+
+    assert asyncio.run(TelegramReaderService().fetch_source(db_session, waiting)) == 0
+
+
+def test_the_same_link_is_not_added_twice(logged_in, db_session, csrf):
+    db_session.add(SourceChannel(
+        title="Закрытый", username=None, url="https://t.me/+hash",
+        invite_hash="hash", join_state="requested", project_id=1,
+    ))
+    db_session.commit()
+
+    answer = logged_in.post("/sources", data={
+        "title": "Он же", "username_or_url": "https://t.me/+hash",
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    assert "error=" in answer.headers["location"], "оператору должны сказать, что канал уже есть"
+    assert db_session.query(SourceChannel).filter_by(invite_hash="hash").count() == 1
