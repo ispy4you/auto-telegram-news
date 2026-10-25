@@ -18,6 +18,9 @@ LONG_REASON = (
 
 
 def _rejected_post(db_session, source, reason: str = LONG_REASON) -> RawPost:
+    # Список постов показывает только текущий проект, поэтому источник должен
+    # в нём состоять — иначе карточки на странице не окажется.
+    source.project_id = 1
     post = RawPost(
         source_id=source.id,
         telegram_message_id=226,
