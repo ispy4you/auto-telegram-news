@@ -201,3 +201,35 @@ def test_the_same_link_is_not_added_twice(logged_in, db_session, csrf):
 
     assert "error=" in answer.headers["location"], "оператору должны сказать, что канал уже есть"
     assert db_session.query(SourceChannel).filter_by(invite_hash="hash").count() == 1
+
+
+def test_a_post_of_a_private_channel_keeps_a_link_to_its_source():
+    """Участнику открывается t.me/c/<id>/<сообщение> — ссылка не пропадает."""
+    from app.services.telegram_reader import _message_url
+
+    private = SourceChannel(title="Закрытый", username=None, telegram_channel_id=777)
+    public = SourceChannel(title="Публичный", username="news")
+    waiting = SourceChannel(title="Ждём", username=None, join_state="requested")
+
+    assert _message_url(private, 42) == "https://t.me/c/777/42"
+    assert _message_url(public, 42) == "https://t.me/news/42"
+    assert _message_url(waiting, 42) is None
+
+
+def test_being_kicked_out_is_told_apart_from_a_cold_cache():
+    """Выгнали — искать по диалогам бессмысленно, канала там уже нет."""
+    from telethon.errors import ChannelPrivateError
+
+    from app.services.telegram_reader import TelegramReaderService
+
+    class _Client:
+        async def get_entity(self, peer):
+            raise ChannelPrivateError(None)
+
+        def iter_dialogs(self):
+            raise AssertionError("по диалогам тут искать нечего")
+
+    with pytest.raises(RuntimeError) as exc:
+        asyncio.run(TelegramReaderService()._entity_by_id(_Client(), 777))
+
+    assert "исключили" in str(exc.value)

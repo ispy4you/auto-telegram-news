@@ -7,6 +7,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from telethon import TelegramClient
+from telethon.errors import ChannelPrivateError
 from telethon.tl.types import MessageMediaDocument, MessageMediaPhoto, PeerChannel
 
 from app.config import get_settings
@@ -27,6 +28,20 @@ _SKIPPED_QUIET_PERIOD = timedelta(hours=1)
 def source_label(source: SourceChannel) -> str:
     """Как назвать источник в журнале. У закрытого канала имени нет вовсе."""
     return f"@{source.username}" if source.username else f"«{source.title}»"
+
+
+def _message_url(source: SourceChannel, message_id: int) -> str | None:
+    """Ссылка на исходное сообщение.
+
+    У закрытого канала публичного адреса нет, но участнику открывается ссылка
+    вида t.me/c/<id>/<сообщение> — именно её Telegram даёт по «Копировать
+    ссылку» внутри такого канала.
+    """
+    if source.username:
+        return f"https://t.me/{source.username}/{message_id}"
+    if source.telegram_channel_id:
+        return f"https://t.me/c/{source.telegram_channel_id}/{message_id}"
+    return None
 
 
 class TelegramReaderService:
@@ -147,6 +162,13 @@ class TelegramReaderService:
         """Канал по id. Telethon знает его, только если видел в этой сессии."""
         try:
             return await client.get_entity(PeerChannel(channel_id))
+        except ChannelPrivateError:
+            # Нас выгнали или канал удалили. Это не «Telethon не помнит» —
+            # искать по диалогам бессмысленно, канала там уже нет.
+            raise RuntimeError(
+                "Канал закрыт для нас: нас исключили или канал удалён. "
+                "Если это ошибка, попросите ссылку заново и заведите источник ещё раз."
+            ) from None
         except (ValueError, TypeError):
             # Кэш сессии пуст — например, после входа заново. Канал всё ещё наш,
             # просто Telethon о нём не помнит: ищем в списке диалогов.
@@ -502,7 +524,7 @@ class TelegramReaderService:
             source_id=source.id,
             telegram_message_id=msg.id,
             telegram_grouped_id=msg.grouped_id,
-            source_url=f"https://t.me/{source.username}/{msg.id}" if source.username else None,
+            source_url=_message_url(source, msg.id),
             original_text=(msg.message or "").strip(),
             normalized_text="",
             text_hash="",
