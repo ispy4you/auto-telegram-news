@@ -21,6 +21,7 @@ def _rejected_post(db_session, source, reason: str = LONG_REASON) -> RawPost:
     post = RawPost(
         source_id=source.id,
         telegram_message_id=226,
+        text_hash="hash-226",
         original_text="Трамп похвастался, что умеет умножать числа на три.",
         status=RawPostStatus.REJECTED.value,
         ai_suitable=False,
