@@ -40,6 +40,14 @@
       #sidebar { width: 100%; min-height: auto; position: relative; }
       #main { margin-left: 0; padding: 1rem; }
     }
+    /* Причина отказа AI. Полный текст всегда в разметке — обрезает его только
+       CSS, поэтому «подробнее» ничего не догружает и работает без сети. */
+    .reason-text {
+      display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+      -webkit-box-orient: vertical; overflow: hidden;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .reason.open .reason-text { -webkit-line-clamp: unset; line-clamp: unset; }
   </style>
 </head>
 <body>
@@ -192,6 +200,17 @@
   setInterval(() => { if (!document.hidden) poll(); }, 10000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 })();
+</script>
+<script>
+// «Подробнее» у причины отказа. Обработчик один на страницу и висит на
+// документе: карточек на странице до полусотни, и каждой свой слушатель ни к
+// чему. На любой странице с такой карточкой это работает само.
+document.addEventListener('click', (e) => {
+  const btn = e.target.closest('.reason-more');
+  if (!btn) return;
+  const open = btn.closest('.reason').classList.toggle('open');
+  btn.textContent = open ? 'свернуть' : 'подробнее';
+});
 </script>
 </body>
 </html>
