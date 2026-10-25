@@ -191,6 +191,10 @@ class TelegramPublisherService:
             # Внутри try, чтобы неверный токен попал в причину отказа задачи и
             # в журнал — раньше он улетал наружу мимо отметки publish_failed.
             bot = await self._get_bot(db)
+            # Спойлер — свойство канала: Telegram показывает медиа размытым и
+            # открывает его по нажатию. Файл уходит нетронутым — размывает его
+            # сам Telegram, поэтому на диске и в исходнике он остаётся целым.
+            spoiler = bool(target.spoiler_media)
             media = sorted(raw_post.media_items, key=lambda m: m.sort_order)
             if include_media and media_restore.missing_media(raw_post):
                 # Диск не переживает деплой, а сообщение в исходном канале —
@@ -235,9 +239,9 @@ class TelegramPublisherService:
                 caption = text if caption_fits else None
                 caption_entities = entities if caption_fits else None
                 if m.media_type == "video":
-                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, caption_entities=caption_entities)
+                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler)
                 else:
-                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, caption_entities=caption_entities)
+                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler)
                 sent_msg_id = msg.message_id
                 tail_text_pending = caption is None
             else:
@@ -248,9 +252,9 @@ class TelegramPublisherService:
                     caption = text if first else None
                     caption_entities = entities if first else None
                     if m.media_type == "video":
-                        group.append(InputMediaVideo(media=file, caption=caption, caption_entities=caption_entities))
+                        group.append(InputMediaVideo(media=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler))
                     else:
-                        group.append(InputMediaPhoto(media=file, caption=caption, caption_entities=caption_entities))
+                        group.append(InputMediaPhoto(media=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler))
                 msgs = await bot.send_media_group(chat_id=target.chat_id, media=group)
                 sent_msg_id = msgs[0].message_id if msgs else None
                 tail_text_pending = not caption_fits

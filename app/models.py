@@ -94,6 +94,10 @@ class TargetChannel(Base):
     default_mode: Mapped[str] = mapped_column(String(16), default="manual")
     publish_from: Mapped[str | None] = mapped_column(String(5), nullable=True)
     publish_to: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    #: Медиа уходит в канал под спойлером: Telegram сам показывает его
+    #: размытым, а читатель открывает нажатием. Размывает именно Telegram —
+    #: файл отправляется нетронутым, и в постах канала он остаётся целым.
+    spoiler_media: Mapped[bool] = mapped_column(Boolean, default=False)
     #: Промпт по умолчанию для постов, идущих в этот канал. Именно «по
     #: умолчанию», а не «промпт канала»: пост генерируется один раз на все
     #: каналы маршрута, поэтому при двух разных промптах сработает первый.

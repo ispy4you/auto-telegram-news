@@ -36,6 +36,7 @@ def create_target(
     username: str = Form(""),
     enabled: str | None = Form(None),
     auto_publish_enabled: str | None = Form(None),
+    spoiler_media: str | None = Form(None),
     default_mode: str = Form("manual"),
     publish_from: str = Form(""),
     publish_to: str = Form(""),
@@ -49,6 +50,7 @@ def create_target(
         username=username or None,
         enabled=to_bool(enabled),
         auto_publish_enabled=to_bool(auto_publish_enabled),
+        spoiler_media=to_bool(spoiler_media),
         default_mode=default_mode,
         publish_from=publish_from or None,
         publish_to=publish_to or None,
@@ -64,6 +66,7 @@ def edit_target(
     title: str = Form(...),
     chat_id: str = Form(...),
     username: str = Form(""),
+    spoiler_media: str | None = Form(None),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -72,6 +75,17 @@ def edit_target(
         target.title = title
         target.chat_id = chat_id.strip()
         target.username = username.strip().lstrip("@") or None
+        # Снятая галочка в форму не приходит вовсе, поэтому отсутствие поля —
+        # это «выключить», а не «не трогать»: другого способа выключить нет.
+        was = target.spoiler_media
+        target.spoiler_media = to_bool(spoiler_media)
+        if was != target.spoiler_media:
+            db.add(ActionLog(
+                action="target_spoiler_change",
+                entity_type="TargetChannel",
+                entity_id=str(target.id),
+                message=f"Спойлер на медиа «{target.title}»: {'включён' if target.spoiler_media else 'выключен'}",
+            ))
         db.commit()
     return RedirectResponse(url="/targets?ok=Канал+обновлён", status_code=302)
 
