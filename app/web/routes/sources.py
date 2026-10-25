@@ -61,6 +61,17 @@ async def create_source(
         return await _add_private_source(request, db, title, invite, pid)
 
     username = TelegramReaderService._extract_username(username_or_url)
+    # Ссылка на сообщение внутри закрытого канала (t.me/c/<id>/<номер>) выглядит
+    # как адрес канала, а разбирается в имя «c»: источник заводился рабочим
+    # с виду и не собирал ничего.
+    if not username or username == "c":
+        beef = (
+            "Это ссылка на сообщение внутри закрытого канала. Чтобы читать такой "
+            "канал, нужна ссылка-приглашение вида t.me/+…"
+            if username == "c" else
+            "Непонятный адрес: укажите @имя, https://t.me/имя или ссылку-приглашение t.me/+…"
+        )
+        return RedirectResponse(url=f"/sources?error={urllib.parse.quote(beef)}", status_code=302)
     db.add(SourceChannel(title=title, username=username, source_type="telethon", rss_url=None, url=f"https://t.me/{username}", enabled=True, project_id=pid))
     db.commit()
     listener = getattr(request.app.state, "event_listener", None)

@@ -322,3 +322,24 @@ def test_one_channel_does_not_become_two_sources(logged_in, db_session, csrf, mo
 
     assert "error=" in answer.headers["location"]
     assert db_session.query(SourceChannel).filter_by(telegram_channel_id=777).count() == 1
+
+
+def test_a_message_link_is_not_mistaken_for_a_channel(logged_in, db_session, csrf):
+    """t.me/c/<id>/<номер> разбиралось в имя «c»: источник выглядел рабочим и молчал."""
+    answer = logged_in.post("/sources", data={
+        "title": "Закрытый", "username_or_url": "https://t.me/c/1234567890/45",
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    assert "error=" in answer.headers["location"]
+    assert db_session.query(SourceChannel).filter_by(username="c").count() == 0
+
+
+def test_an_empty_address_is_refused(logged_in, db_session, csrf):
+    answer = logged_in.post("/sources", data={
+        "title": "Никакой", "username_or_url": "https://t.me/",
+        "csrf_token": csrf(logged_in, "/sources"),
+    })
+
+    assert "error=" in answer.headers["location"]
+    assert db_session.query(SourceChannel).filter_by(username="").count() == 0
