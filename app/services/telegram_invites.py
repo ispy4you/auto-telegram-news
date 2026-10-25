@@ -9,7 +9,6 @@
 оператору, решает вызывающий код.
 """
 
-import logging
 import re
 from dataclasses import dataclass
 
@@ -20,12 +19,10 @@ from telethon.errors import (
     UserAlreadyParticipantError,
 )
 from telethon.tl.functions.messages import CheckChatInviteRequest, ImportChatInviteRequest
-from telethon.tl.types import ChatInviteAlready, ChatInvitePeek
+from telethon.tl.types import ChatInviteAlready
 
-logger = logging.getLogger(__name__)
-
-#: t.me/+XXXX и старый вид t.me/joinchat/XXXX. Берём и голый хвост: оператор
-#: может скопировать его без адреса.
+#: t.me/+XXXX и старый вид t.me/joinchat/XXXX. Голый хвост без адреса не
+#: принимаем намеренно: он неотличим от обычного имени канала.
 _INVITE_LINK = re.compile(
     r"(?:https?://)?(?:t(?:elegram)?\.me)/(?:joinchat/|\+)(?P<hash>[\w-]+)",
     re.IGNORECASE,
@@ -48,7 +45,6 @@ class InviteOutcome:
     state: str                 # REQUESTED или JOINED
     title: str                 # название канала — его Telegram отдаёт и до одобрения
     channel_id: int | None     # появляется только после одобрения
-    entity: object | None = None
 
 
 def parse_invite(text: str) -> str | None:
@@ -71,10 +67,15 @@ async def _ask(client, invite_hash: str):
 
 
 def _joined(info) -> InviteOutcome | None:
-    """Канал из ответа — он есть только у того, кого уже впустили."""
+    """Канал из ответа — он есть только у того, кого уже впустили.
+
+    Временный просмотр (ChatInvitePeek) членством не считаем: он выдаётся на
+    срок и кончается сам. Приняв его за вступление, панель отчиталась бы «канал
+    открыт», собрала несколько постов и замолчала без объяснения.
+    """
     chat = getattr(info, "chat", None)
-    if isinstance(info, (ChatInviteAlready, ChatInvitePeek)) and chat is not None:
-        return InviteOutcome(JOINED, getattr(chat, "title", "") or "", chat.id, chat)
+    if isinstance(info, ChatInviteAlready) and chat is not None:
+        return InviteOutcome(JOINED, getattr(chat, "title", "") or "", chat.id)
     return None
 
 
@@ -119,4 +120,4 @@ async def join(client, invite_hash: str) -> InviteOutcome:
     if not chats:
         return InviteOutcome(JOINED, title, None)
     chat = chats[0]
-    return InviteOutcome(JOINED, getattr(chat, "title", "") or title, chat.id, chat)
+    return InviteOutcome(JOINED, getattr(chat, "title", "") or title, chat.id)

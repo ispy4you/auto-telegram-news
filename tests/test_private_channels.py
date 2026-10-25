@@ -6,6 +6,7 @@
 """
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest
@@ -286,3 +287,13 @@ def test_an_approved_request_opens_the_channel(logged_in, db_session, csrf, monk
 
     db_session.refresh(waiting)
     assert (waiting.join_state, waiting.telegram_channel_id) == ("joined", 777)
+
+
+def test_a_temporary_peek_is_not_membership():
+    """Просмотр по ссылке выдаётся на срок: приняв его за вступление, панель
+    собрала бы пару постов и замолчала."""
+    from telethon.tl.types import ChatInvitePeek
+
+    client = _FakeClient(ChatInvitePeek(chat=_channel(99), expires=datetime(2026, 1, 1)))
+
+    assert asyncio.run(telegram_invites.check(client, "hash")) is None
