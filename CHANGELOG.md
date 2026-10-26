@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.7.0...v1.7.1) (2026-10-26)
+
+
+### Bug Fixes
+
+* отказ AI-шлюза объясняет, что чинить ([#65](https://github.com/ispy4you/auto-telegram-news/issues/65)) ([f509916](https://github.com/ispy4you/auto-telegram-news/commit/f509916d03dc0857f85cde9d21c9db73d05ae64a))
+* слушатель считает каналы, а не ключи ([#64](https://github.com/ispy4you/auto-telegram-news/issues/64)) ([9d2b845](https://github.com/ispy4you/auto-telegram-news/commit/9d2b8453011327ac6623818e82a1bbe305369ecd))
+
 ## [1.7.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.6.1...v1.7.0) (2026-10-25)
 
 
