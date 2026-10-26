@@ -52,6 +52,9 @@ class TelegramEventListenerService:
         # Два вида ключей нужны потому, что у закрытого канала имени нет вовсе,
         # а у публичного id появляется только после первого обращения к нему.
         self._source_keys: set = set()
+        # Сколько именно каналов за этими ключами: ключей у канала два (имя и
+        # id), и в счётчике для человека они удваивали число.
+        self._watched_count = 0
         # Буфер для альбомов (grouped_id -> list of (ключ канала, msg))
         self._album_buffer: dict[int, list] = defaultdict(list)
         self._album_tasks: dict[int, asyncio.Task] = {}
@@ -134,10 +137,14 @@ class TelegramEventListenerService:
                     SourceChannel.source_type == "telethon",
                 )
             ).all()
-            keys: set = {s.username.lower() for s in sources if s.username}
-            keys |= {s.telegram_channel_id for s in sources if s.telegram_channel_id}
+            # Источник без имени и без id — это закрытый канал с неодобренной
+            # заявкой: узнать его пост не по чему, и в мониторинге его нет.
+            watched = [s for s in sources if s.username or s.telegram_channel_id]
+            keys: set = {s.username.lower() for s in watched if s.username}
+            keys |= {s.telegram_channel_id for s in watched if s.telegram_channel_id}
             self._source_keys = keys
-        logger.debug("Event listener: %d каналов в мониторинге", len(self._source_keys))
+            self._watched_count = len(watched)
+        logger.debug("Event listener: %d каналов в мониторинге", self._watched_count)
 
     # ------------------------------------------------------------------
     # Внутренние методы
@@ -306,10 +313,10 @@ class TelegramEventListenerService:
         await self.reload_sources()
         self._active = True
         self._forget_failure()
-        logger.info("Event listener активен, слушает %d каналов", len(self._source_keys))
+        logger.info("Event listener активен, слушает %d каналов", self._watched_count)
         self._note(
             "listener_connected",
-            f"Слушатель Telegram подключён, каналов в мониторинге: {len(self._source_keys)}.",
+            f"Слушатель Telegram подключён, каналов в мониторинге: {self._watched_count}.",
         )
 
         await self._catchup(client)
