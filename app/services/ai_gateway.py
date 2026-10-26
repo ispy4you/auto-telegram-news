@@ -36,6 +36,44 @@ class AiResult:
     finish_reason: str = ""
 
 
+def _why_gateway_failed(exc: Exception, model: str, timeout_seconds: float) -> str:
+    """Объясняет отказ шлюза словами, по которым понятно, что чинить.
+
+    Раньше сюда попадал текст httpx: «Client error '410 Gone' for url …» со
+    ссылкой на справочник кодов HTTP. По нему не прочитать главного — что
+    именно сломалось и куда идти. А ломается почти всегда одно из трёх:
+    ключ, модель или лимит.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code
+        if code in (401, 403):
+            return (
+                f"Шлюз не принял ключ ({code}). Проверьте ключ AI-шлюза "
+                "в Настройках — возможно, он отозван или скопирован не целиком."
+            )
+        if code in (404, 410):
+            return (
+                f"Шлюз больше не обслуживает модель «{model}» ({code}). "
+                "Выберите другую в Настройках → Модель AI-шлюза: названия моделей "
+                "меняются, когда провайдер снимает версию."
+            )
+        if code == 429:
+            return (
+                "Шлюз просит подождать (429): упёрлись в лимит запросов или "
+                "кончились оплаченные токены."
+            )
+        if code >= 500:
+            return f"Шлюз отвечает ошибкой {code} — это на его стороне. Попробуйте позже."
+        return f"Шлюз отказал с кодом {code}."
+    if isinstance(exc, httpx.TimeoutException):
+        return (
+            f"Шлюз не ответил за {timeout_seconds:g} с. Либо он перегружен, либо "
+            "ответ не помещается в отведённое время — таймаут настраивается."
+        )
+    if isinstance(exc, httpx.RequestError):
+        return f"До шлюза не достучаться: {type(exc).__name__}. Проверьте адрес шлюза и сеть."
+    return f"AI gateway недоступен: {type(exc).__name__}: {exc}"
+
 class AiGatewayClient:
     @staticmethod
     def _post_values(raw_post: RawPost) -> dict[str, str]:
@@ -129,7 +167,7 @@ class AiGatewayClient:
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as exc:
-            return AiResult(False, "", f"AI gateway недоступен: {type(exc).__name__}: {exc}", model, failed=True)
+            return AiResult(False, "", _why_gateway_failed(exc, model, timeout_seconds), model, failed=True)
 
         choice = (data.get("choices") or [{}])[0] or {}
         message = choice.get("message") or {}
