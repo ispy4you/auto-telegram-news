@@ -10,6 +10,7 @@ from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, R
 from app.services import post_lifecycle, post_routing, prompts, settings_registry
 from app.services.ai_gateway import AiGatewayClient
 from app.services.deduplication import DeduplicationService
+from app.services import markdown_entities, message_entities
 from app.services.telegram_reader import TelegramReaderService, source_label
 from app.services.telegram_publisher import TelegramPublisherService
 
@@ -160,9 +161,11 @@ class NewsPipelineService:
                 db.commit()
                 continue
 
+            text, marks = markdown_entities.parse(result.text)
             generated = GeneratedPost(
                 raw_post_id=post.id,
-                generated_text=result.text.strip(),
+                generated_text=text,
+                generated_entities=message_entities.dumps(marks),
                 model_name=result.model_name,
                 status=GeneratedPostStatus.DRAFT.value,
             )

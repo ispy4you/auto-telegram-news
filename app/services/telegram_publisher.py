@@ -176,9 +176,12 @@ class TelegramPublisherService:
         text = (generated.edited_text or generated.generated_text or "").strip()
         if not text:
             raise ValueError("Empty publish text")
-        # Разметка описывает отредактированный текст, поэтому к исходному
-        # тексту модели она неприменима — смещения указывали бы мимо.
-        stored = message_entities.loads(generated.entities) if generated.edited_text else []
+        # Разметка всегда описывает тот текст, который уходит: правил редактор —
+        # берём его разметку, не правил — ту, что разобрана из ответа модели.
+        # Перепутать нельзя: смещения указывали бы мимо.
+        stored = message_entities.loads(
+            generated.entities if generated.edited_text else generated.generated_entities
+        )
         entities = message_entities.to_aiogram(stored) or None
         # Лимит подписи Telegram тоже считает в единицах UTF-16.
         caption_fits = message_entities.utf16_len(text) <= 1024

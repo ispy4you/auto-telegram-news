@@ -33,6 +33,12 @@
         <label class="form-label">Правила для AI</label>
         <textarea class="form-control" name="body" id="ai-prompt" rows="16" style="font-size:.9rem">{{ prompt.body }}</textarea>
         <div class="form-text">Пишите обычными словами — как объясняли бы редактору-новичку в первый день.</div>
+        <div class="form-text">
+          Оформление модель может ставить разметкой: <code>**жирный**</code>, <code>*курсив*</code>,
+          <code>__подчёркнутый__</code>, <code>~~зачёркнутый~~</code>, <code>||скрытый||</code>,
+          <code>`код`</code> и <code>[текст](https://…)</code>. Панель разберёт её сама —
+          в канал уйдёт оформление, а не знаки.
+        </div>
 
         <details class="mt-3">
           <summary class="small text-muted" style="cursor:pointer">Что уходит в модель помимо ваших правил</summary>

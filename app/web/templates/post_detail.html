@@ -243,8 +243,9 @@
                 <input type="hidden" name="entities" id="entities-{{ g.id }}">
                 <script type="application/json" id="draft-{{ g.id }}">{{ {
                   'text': g.edited_text or g.generated_text or '',
-                  'entities': g.entities or '[]',
+                  'entities': (g.entities if g.edited_text else g.generated_entities) or '[]',
                   'original': g.generated_text or '',
+                  'original_entities': g.generated_entities or '[]',
                 } | tojson }}</script>
 
                 <div class="tg-toolbar btn-group btn-group-sm mb-1" role="group" data-editor="{{ g.id }}">
@@ -577,7 +578,12 @@ function loadDraft(id, text, entities) {
 }
 
 function resetDraft(id) {
-  loadDraft(id, draftSource(id).original, []);
+  // «Сбросить» возвращает текст модели вместе с её оформлением: без него
+  // сброс превращал жирный заголовок в простую строку.
+  const src = draftSource(id);
+  let marks = [];
+  try { marks = JSON.parse(src.original_entities || '[]'); } catch (_) {}
+  loadDraft(id, src.original, marks);
 }
 
 function collectDraft(id) {
