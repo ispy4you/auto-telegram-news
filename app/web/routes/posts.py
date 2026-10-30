@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import SessionLocal, get_db
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, MediaItem, MediaOrigin, RawPost, RawPostStatus, SourceChannel, TargetChannel
-from app.services import media_restore, media_storage, post_lifecycle, prompts
+from app.services import markdown_entities, media_restore, media_storage, message_entities, post_lifecycle, prompts
 from app.services.ai_gateway import AiGatewayClient, AiResult, GenerationFailed
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
@@ -100,9 +100,13 @@ async def _request_generation(post: RawPost, db: Session, prompt_id: int | None 
 
 
 def _save_generation(post: RawPost, result: AiResult, db: Session) -> None:
+    # Модель пишет markdown; Telegram такой текст показывает со звёздочками,
+    # поэтому разметку разбираем сразу — её увидят и редактор, и предпросмотр.
+    text, marks = markdown_entities.parse(result.text)
     db.add(GeneratedPost(
         raw_post_id=post.id,
-        generated_text=result.text,
+        generated_text=text,
+        generated_entities=message_entities.dumps(marks),
         model_name=result.model_name,
         status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
         generation_error=result.reason if not result.suitable else None,

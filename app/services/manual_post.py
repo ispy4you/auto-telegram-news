@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models import GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel
+from app.services import markdown_entities, message_entities
 from app.services.deduplication import DeduplicationService
 
 #: Тип скрытого источника. По нему ручной источник отличается от настоящих
@@ -94,9 +95,11 @@ def create(
     )
     db.add(post)
     db.flush()
+    text, marks = markdown_entities.parse(generated_text)
     db.add(GeneratedPost(
         raw_post_id=post.id,
-        generated_text=generated_text,
+        generated_text=text,
+        generated_entities=message_entities.dumps(marks),
         model_name=model_name,
         status=GeneratedPostStatus.DRAFT.value,
     ))

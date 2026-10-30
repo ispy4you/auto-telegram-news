@@ -201,6 +201,10 @@ class GeneratedPost(Base):
     publish_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     #: Разметка отредактированного текста: JSON-список сущностей Telegram.
     entities: Mapped[str | None] = mapped_column(Text, nullable=True)
+    #: Разметка текста модели — отдельно от правок редактора. Иначе первая же
+    #: правка затирала бы оформление, с которым пост пришёл, и «Сбросить»
+    #: возвращало бы голый текст.
+    generated_entities: Mapped[str | None] = mapped_column(Text, nullable=True)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
