@@ -103,10 +103,14 @@ class TargetChannel(Base):
     default_mode: Mapped[str] = mapped_column(String(16), default="manual")
     publish_from: Mapped[str | None] = mapped_column(String(5), nullable=True)
     publish_to: Mapped[str | None] = mapped_column(String(5), nullable=True)
-    #: Медиа уходит в канал под спойлером: Telegram сам показывает его
-    #: размытым, а читатель открывает нажатием. Размывает именно Telegram —
-    #: файл отправляется нетронутым, и в постах канала он остаётся целым.
-    spoiler_media: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Что уходит в канал под спойлером: «off» — ничего, «photo» — только
+    #: фотографии, «video» — только видео, «all» — и то и другое. Размывает
+    #: Telegram на своей стороне, файл отправляется нетронутым.
+    #:
+    #: Разделение по типу нужно потому, что причины прятать у них разные:
+    #: кадр с места события прячут от неожиданности, а видео — чтобы его не
+    #: проигрывали в ленте без спроса.
+    spoiler_media_mode: Mapped[str] = mapped_column(String(8), default="off")
     #: Промпт по умолчанию для постов, идущих в этот канал. Именно «по
     #: умолчанию», а не «промпт канала»: пост генерируется один раз на все
     #: каналы маршрута, поэтому при двух разных промптах сработает первый.

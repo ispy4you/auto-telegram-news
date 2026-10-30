@@ -8,11 +8,20 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import ActionLog, Prompt, TargetChannel
 from app.services import prompts
-from app.services.telegram_publisher import TelegramPublisherService
+from app.services.telegram_publisher import SPOILER_MODES, TelegramPublisherService
 from app.web.auth import require_auth
 from app.web.routes.common import current_project_id, to_bool, tpl
 
 router = APIRouter()
+
+
+def _spoiler_mode(value: str) -> str:
+    """Режим спойлера из формы. Чужое значение читаем как «не прятать».
+
+    Список приходит из select, но POST можно собрать и руками: неизвестное
+    слово не должно попадать в базу и всплывать потом на публикации.
+    """
+    return value if value in SPOILER_MODES else "off"
 
 
 @router.get("/targets")
@@ -25,6 +34,7 @@ def targets(request: Request, db: Session = Depends(get_db), _: bool = Depends(r
     return tpl(request, "targets.html", db, {
         "items": items, "ok": ok, "error": error,
         "prompts": prompts.all_prompts(db),
+        "spoiler_modes": SPOILER_MODES,
     })
 
 
@@ -36,7 +46,7 @@ def create_target(
     username: str = Form(""),
     enabled: str | None = Form(None),
     auto_publish_enabled: str | None = Form(None),
-    spoiler_media: str | None = Form(None),
+    spoiler_media_mode: str = Form("off"),
     default_mode: str = Form("manual"),
     publish_from: str = Form(""),
     publish_to: str = Form(""),
@@ -50,7 +60,7 @@ def create_target(
         username=username or None,
         enabled=to_bool(enabled),
         auto_publish_enabled=to_bool(auto_publish_enabled),
-        spoiler_media=to_bool(spoiler_media),
+        spoiler_media_mode=_spoiler_mode(spoiler_media_mode),
         default_mode=default_mode,
         publish_from=publish_from or None,
         publish_to=publish_to or None,
@@ -66,7 +76,7 @@ def edit_target(
     title: str = Form(...),
     chat_id: str = Form(...),
     username: str = Form(""),
-    spoiler_media: str | None = Form(None),
+    spoiler_media_mode: str = Form("off"),
     db: Session = Depends(get_db),
     _: bool = Depends(require_auth),
 ):
@@ -75,16 +85,14 @@ def edit_target(
         target.title = title
         target.chat_id = chat_id.strip()
         target.username = username.strip().lstrip("@") or None
-        # Снятая галочка в форму не приходит вовсе, поэтому отсутствие поля —
-        # это «выключить», а не «не трогать»: другого способа выключить нет.
-        was = target.spoiler_media
-        target.spoiler_media = to_bool(spoiler_media)
-        if was != target.spoiler_media:
+        was = target.spoiler_media_mode
+        target.spoiler_media_mode = _spoiler_mode(spoiler_media_mode)
+        if was != target.spoiler_media_mode:
             db.add(ActionLog(
                 action="target_spoiler_change",
                 entity_type="TargetChannel",
                 entity_id=str(target.id),
-                message=f"Спойлер на медиа «{target.title}»: {'включён' if target.spoiler_media else 'выключен'}",
+                message=f"Спойлер на медиа «{target.title}»: {SPOILER_MODES[target.spoiler_media_mode].lower()}",
             ))
         db.commit()
     return RedirectResponse(url="/targets?ok=Канал+обновлён", status_code=302)

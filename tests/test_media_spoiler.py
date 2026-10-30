@@ -1,7 +1,8 @@
-"""Медиа уходит в канал под спойлером, если так настроен канал.
+"""Медиа уходит в канал под спойлером — и ровно то, которое выбрано.
 
 Размывает картинку сам Telegram по флагу has_spoiler: файл отправляется
-нетронутым, и читатель открывает его нажатием.
+нетронутым, и читатель открывает его нажатием. Канал выбирает, что прятать:
+только фото, только видео или всё.
 """
 
 import asyncio
@@ -46,8 +47,8 @@ def _publish(bot, db, generated_id, target_id):
 
 @pytest.fixture
 def make_target(db_session):
-    def _make(spoiler: bool) -> TargetChannel:
-        channel = TargetChannel(title="Target", chat_id="@target", spoiler_media=spoiler)
+    def _make(mode: str) -> TargetChannel:
+        channel = TargetChannel(title="Target", chat_id="@target", spoiler_media_mode=mode)
         db_session.add(channel)
         db_session.commit()
         db_session.refresh(channel)
@@ -79,7 +80,7 @@ def make_post(db_session, source, tmp_path):
 
 
 def test_a_photo_goes_out_hidden(db_session, make_post, make_target):
-    post, target = make_post(("photo",)), make_target(True)
+    post, target = make_post(("photo",)), make_target("all")
     bot = _CapturingBot()
 
     _publish(bot, db_session, post.id, target.id)
@@ -90,7 +91,7 @@ def test_a_photo_goes_out_hidden(db_session, make_post, make_target):
 
 
 def test_a_video_goes_out_hidden_too(db_session, make_post, make_target):
-    post, target = make_post(("video",)), make_target(True)
+    post, target = make_post(("video",)), make_target("all")
     bot = _CapturingBot()
 
     _publish(bot, db_session, post.id, target.id)
@@ -102,7 +103,7 @@ def test_a_video_goes_out_hidden_too(db_session, make_post, make_target):
 
 def test_every_file_of_an_album_is_hidden(db_session, make_post, make_target):
     """Одна открытая картинка в альбоме обессмысливает спойлер на остальных."""
-    post, target = make_post(("photo", "video", "photo")), make_target(True)
+    post, target = make_post(("photo", "video", "photo")), make_target("all")
     bot = _CapturingBot()
 
     _publish(bot, db_session, post.id, target.id)
@@ -113,7 +114,7 @@ def test_every_file_of_an_album_is_hidden(db_session, make_post, make_target):
 
 
 def test_a_channel_without_the_flag_sends_media_open(db_session, make_post, make_target):
-    post, target = make_post(("photo",)), make_target(False)
+    post, target = make_post(("photo",)), make_target("off")
     bot = _CapturingBot()
 
     _publish(bot, db_session, post.id, target.id)
@@ -121,23 +122,86 @@ def test_a_channel_without_the_flag_sends_media_open(db_session, make_post, make
     assert bot.sent[0][1]["has_spoiler"] is False
 
 
-def test_the_flag_reaches_the_channel_from_the_form(logged_in, db_session, csrf):
-    """Галочка в карточке канала — единственный способ это включить."""
+def test_only_photos_are_hidden_when_the_channel_asks_for_photos(db_session, make_post, make_target):
+    """Видео в том же альбоме остаётся открытым: канал просил спрятать фото."""
+    post, target = make_post(("photo", "video")), make_target("photo")
+    bot = _CapturingBot()
+
+    _publish(bot, db_session, post.id, target.id)
+
+    name, kwargs = bot.sent[0]
+    assert name == "send_media_group"
+    assert [item.has_spoiler for item in kwargs["media"]] == [True, False]
+
+
+def test_only_videos_are_hidden_when_the_channel_asks_for_videos(db_session, make_post, make_target):
+    post, target = make_post(("photo", "video")), make_target("video")
+    bot = _CapturingBot()
+
+    _publish(bot, db_session, post.id, target.id)
+
+    assert [item.has_spoiler for item in bot.sent[0][1]["media"]] == [False, True]
+
+
+def test_a_single_video_follows_the_video_setting(db_session, make_post, make_target):
+    post, target = make_post(("video",)), make_target("video")
+    bot = _CapturingBot()
+
+    _publish(bot, db_session, post.id, target.id)
+
+    assert bot.sent[0][0] == "send_video"
+    assert bot.sent[0][1]["has_spoiler"] is True
+
+
+def test_a_photo_stays_open_in_a_video_only_channel(db_session, make_post, make_target):
+    post, target = make_post(("photo",)), make_target("video")
+    bot = _CapturingBot()
+
+    _publish(bot, db_session, post.id, target.id)
+
+    assert bot.sent[0][1]["has_spoiler"] is False
+
+
+def test_an_unknown_mode_hides_nothing(db_session, make_post, make_target):
+    """Показать лишнее безопаснее, чем спрятать то, что прятать не просили."""
+    post, target = make_post(("photo", "video")), make_target("чепуха")
+    bot = _CapturingBot()
+
+    _publish(bot, db_session, post.id, target.id)
+
+    assert [item.has_spoiler for item in bot.sent[0][1]["media"]] == [False, False]
+
+
+def test_the_mode_reaches_the_channel_from_the_form(logged_in, db_session, csrf):
+    """Выбор в карточке канала — единственный способ это включить."""
     channel = TargetChannel(title="Target", chat_id="@target")
     db_session.add(channel)
     db_session.commit()
 
     logged_in.post(f"/targets/{channel.id}/edit", data={
         "title": "Target", "chat_id": "@target", "username": "",
-        "spoiler_media": "on", "csrf_token": csrf(logged_in, "/targets"),
+        "spoiler_media_mode": "video", "csrf_token": csrf(logged_in, "/targets"),
     })
     db_session.refresh(channel)
-    assert channel.spoiler_media is True
+    assert channel.spoiler_media_mode == "video"
 
-    # Снятая галочка в POST не приходит вовсе — это и значит «выключить».
     logged_in.post(f"/targets/{channel.id}/edit", data={
         "title": "Target", "chat_id": "@target", "username": "",
-        "csrf_token": csrf(logged_in, "/targets"),
+        "spoiler_media_mode": "off", "csrf_token": csrf(logged_in, "/targets"),
     })
     db_session.refresh(channel)
-    assert channel.spoiler_media is False
+    assert channel.spoiler_media_mode == "off"
+
+
+def test_a_made_up_mode_does_not_reach_the_database(logged_in, db_session, csrf):
+    """Форму можно собрать руками — чужое слово не должно всплыть на публикации."""
+    channel = TargetChannel(title="Target", chat_id="@target", spoiler_media_mode="all")
+    db_session.add(channel)
+    db_session.commit()
+
+    logged_in.post(f"/targets/{channel.id}/edit", data={
+        "title": "Target", "chat_id": "@target", "username": "",
+        "spoiler_media_mode": "всё и сразу", "csrf_token": csrf(logged_in, "/targets"),
+    })
+    db_session.refresh(channel)
+    assert channel.spoiler_media_mode == "off"

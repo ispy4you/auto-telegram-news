@@ -26,6 +26,27 @@ class BotTokenError(RuntimeError):
 
 
 
+#: Что прячет канал: настройка канала → типы медиа, которые уходят размытыми.
+SPOILER_MODES = {
+    "off": "Без спойлера",
+    "photo": "Только фото",
+    "video": "Только видео",
+    "all": "Фото и видео",
+}
+
+
+def _spoiler_kinds(mode: str | None) -> frozenset[str]:
+    """Типы медиа, которые этот канал прячет.
+
+    Неизвестное значение читаем как «ничего не прятать»: показать лишнее
+    безопаснее, чем спрятать то, что прятать не просили.
+    """
+    if mode == "all":
+        return frozenset({"photo", "video"})
+    if mode in ("photo", "video"):
+        return frozenset({mode})
+    return frozenset()
+
 def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
     tz = zoneinfo.ZoneInfo(tz_name)
     now = datetime.now(tz).time().replace(second=0, microsecond=0)
@@ -191,10 +212,10 @@ class TelegramPublisherService:
             # Внутри try, чтобы неверный токен попал в причину отказа задачи и
             # в журнал — раньше он улетал наружу мимо отметки publish_failed.
             bot = await self._get_bot(db)
-            # Спойлер — свойство канала: Telegram показывает медиа размытым и
-            # открывает его по нажатию. Файл уходит нетронутым — размывает его
-            # сам Telegram, поэтому на диске и в исходнике он остаётся целым.
-            spoiler = bool(target.spoiler_media)
+            # Спойлер — свойство канала, и прячет он то, что выбрано: только
+            # фото, только видео или всё. Размывает Telegram на своей стороне,
+            # файл уходит нетронутым и в исходнике остаётся целым.
+            hidden = _spoiler_kinds(target.spoiler_media_mode)
             media = sorted(raw_post.media_items, key=lambda m: m.sort_order)
             if include_media and media_restore.missing_media(raw_post):
                 # Диск не переживает деплой, а сообщение в исходном канале —
@@ -239,9 +260,9 @@ class TelegramPublisherService:
                 caption = text if caption_fits else None
                 caption_entities = entities if caption_fits else None
                 if m.media_type == "video":
-                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler)
+                    msg = await bot.send_video(chat_id=target.chat_id, video=file, caption=caption, caption_entities=caption_entities, has_spoiler="video" in hidden)
                 else:
-                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler)
+                    msg = await bot.send_photo(chat_id=target.chat_id, photo=file, caption=caption, caption_entities=caption_entities, has_spoiler="photo" in hidden)
                 sent_msg_id = msg.message_id
                 tail_text_pending = caption is None
             else:
@@ -252,9 +273,9 @@ class TelegramPublisherService:
                     caption = text if first else None
                     caption_entities = entities if first else None
                     if m.media_type == "video":
-                        group.append(InputMediaVideo(media=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler))
+                        group.append(InputMediaVideo(media=file, caption=caption, caption_entities=caption_entities, has_spoiler="video" in hidden))
                     else:
-                        group.append(InputMediaPhoto(media=file, caption=caption, caption_entities=caption_entities, has_spoiler=spoiler))
+                        group.append(InputMediaPhoto(media=file, caption=caption, caption_entities=caption_entities, has_spoiler="photo" in hidden))
                 msgs = await bot.send_media_group(chat_id=target.chat_id, media=group)
                 sent_msg_id = msgs[0].message_id if msgs else None
                 tail_text_pending = not caption_fits
