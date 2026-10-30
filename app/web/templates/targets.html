@@ -49,10 +49,14 @@
           <input class="form-check-input" type="checkbox" name="auto_publish_enabled" id="t-auto">
           <label class="form-check-label small" for="t-auto">Автопубликация</label>
         </div>
-        <div class="form-check mb-0">
-          <input class="form-check-input" type="checkbox" name="spoiler_media" id="t-spoiler">
-          <label class="form-check-label small" for="t-spoiler" title="Telegram покажет медиа размытым, читатель открывает нажатием">Медиа под спойлером</label>
-        </div>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label small text-muted mb-1" title="Telegram покажет медиа размытым, читатель открывает нажатием">Спойлер</label>
+        <select class="form-select" name="spoiler_media_mode">
+          {% for value, label in spoiler_modes.items() %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
       </div>
       <div class="col-auto">
         <button class="btn btn-primary"><i class="bi bi-plus-lg me-1"></i>Добавить</button>
@@ -119,9 +123,9 @@
             {% else %}
               <span class="text-muted small">—</span>
             {% endif %}
-            {% if t.spoiler_media %}
-            <div class="text-secondary small" title="Медиа уходит под спойлером: Telegram размывает его до нажатия">
-              <i class="bi bi-eye-slash me-1"></i>Спойлер
+            {% if t.spoiler_media_mode != 'off' %}
+            <div class="text-secondary small" title="Telegram размывает такое медиа до нажатия">
+              <i class="bi bi-eye-slash me-1"></i>Спойлер: {{ spoiler_modes[t.spoiler_media_mode]|lower }}
             </div>
             {% endif %}
           </td>
@@ -171,11 +175,13 @@
                 <label class="form-label small text-muted mb-1">Username (опц.)</label>
                 <input class="form-control form-control-sm" name="username" value="{{ t.username or '' }}" placeholder="@channel">
               </div>
-              <div class="col-auto">
-                <div class="form-check mb-0 pt-2">
-                  <input class="form-check-input" type="checkbox" name="spoiler_media" id="t-spoiler-{{ t.id }}" {% if t.spoiler_media %}checked{% endif %}>
-                  <label class="form-check-label small" for="t-spoiler-{{ t.id }}">Медиа под спойлером</label>
-                </div>
+              <div class="col-md-2">
+                <label class="form-label small text-muted mb-1">Спойлер на медиа</label>
+                <select class="form-select form-select-sm" name="spoiler_media_mode">
+                  {% for value, label in spoiler_modes.items() %}
+                  <option value="{{ value }}" {% if t.spoiler_media_mode == value %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
               </div>
               <div class="col-auto">
                 <button class="btn btn-sm btn-primary">Сохранить</button>
