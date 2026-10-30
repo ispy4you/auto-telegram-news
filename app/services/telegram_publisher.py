@@ -47,6 +47,7 @@ def _spoiler_kinds(mode: str | None) -> frozenset[str]:
         return frozenset({mode})
     return frozenset()
 
+
 def _is_within_window(publish_from: str, publish_to: str, tz_name: str) -> bool:
     tz = zoneinfo.ZoneInfo(tz_name)
     now = datetime.now(tz).time().replace(second=0, microsecond=0)

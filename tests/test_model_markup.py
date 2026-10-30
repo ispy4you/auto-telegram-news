@@ -63,11 +63,45 @@ def test_the_marks_models_actually_write_are_understood(source, kind):
     "Файл file_name.txt и ещё one_two_three",
     "* пункт списка\n* второй пункт",
     "Просто текст без разметки",
+    "Цены выросли на 20*% за год",
+    "Площадь 5*5 метров",
+    "*По данным Росстата. Отдельно *Источник: ЦБ",
 ])
 def test_ordinary_text_is_left_alone(text):
     clean, marks = _marks(text)
 
     assert (clean, marks) == (text, []), "обычный текст не должен менять вид"
+
+
+def test_a_sign_stuck_to_a_number_does_not_eat_the_line():
+    """«20*%» — опечатка в новости, а не курсив до следующей звёздочки."""
+    clean, marks = _marks("Цены выросли на 20*%, а продажи **упали**.")
+
+    assert clean == "Цены выросли на 20*%, а продажи упали."
+    assert marks == [("bold", 32, 5, None)]
+
+
+def test_a_code_fence_does_not_leak_the_language_name():
+    """Модель открывает блок словом «python» — это служебное слово."""
+    clean, marks = _marks("```python\nprint(1)\n```")
+
+    assert clean == "print(1)"
+    assert marks == [("pre", 0, 8, None)]
+
+
+def test_a_fence_without_a_language_also_closes():
+    clean, marks = _marks("```\nТекст поста\n```")
+
+    assert clean == "Текст поста"
+    assert marks == [("pre", 0, 11, None)]
+
+
+def test_a_link_keeps_brackets_inside_the_address():
+    """Адреса со скобками («…/Иван_(князь)») встречаются у энциклопедий."""
+    clean, marks = _marks("Подробности [в статье](https://ru.wikipedia.org/wiki/Иван_(князь))")
+
+    assert clean == "Подробности в статье"
+    assert marks == [("text_link", 12, 8, "https://ru.wikipedia.org/wiki/Иван_(князь)")]
 
 
 def test_a_bold_link_keeps_both_marks():
