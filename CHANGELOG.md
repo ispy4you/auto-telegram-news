@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.7.1...v1.8.0) (2026-10-30)
+
+
+### Features
+
+* разметка от модели доходит до Telegram ([#68](https://github.com/ispy4you/auto-telegram-news/issues/68)) ([1e4e8b4](https://github.com/ispy4you/auto-telegram-news/commit/1e4e8b470febba9b47030d9713e7625a89367238))
+* спойлер по типу медиа ([#67](https://github.com/ispy4you/auto-telegram-news/issues/67)) ([bd8c20f](https://github.com/ispy4you/auto-telegram-news/commit/bd8c20f401c40aeb62bed3a6fd64b9bde1b37ebf))
+
 ## [1.7.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.7.0...v1.7.1) (2026-10-26)
 
 
