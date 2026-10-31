@@ -5,9 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from telethon import events
 
-from app.models import ActionLog, SourceChannel
-from app.services.telegram_reader import source_label
+from app.models import ActionLog, RawPost, SourceChannel
+from app.services import telegram_session_store
+from app.services.telegram_reader import TelegramReaderService, source_label
 
 logger = logging.getLogger(__name__)
 
@@ -234,7 +236,6 @@ class TelegramEventListenerService:
         self._reconnect_delay = _RECONNECT_DELAY
 
     async def _run_loop(self) -> None:
-        from app.services.telegram_reader import TelegramReaderService
         self._reader = TelegramReaderService()
 
         while True:
@@ -274,12 +275,13 @@ class TelegramEventListenerService:
         async with _TELETHON_LOCK:
             await self._connect_and_listen_locked()
 
-    async def _connect_and_listen_locked(self) -> None:
-        from telethon import events
+    async def _connect_authorized(self):
+        """Подключается и убеждается, что сессия годится для чтения каналов.
 
-        from app.services import telegram_session_store
-
-        client = self._reader._client()
+        Оба отказа оператор исправляет сам в панели, поэтому они вылетают
+        текстом для человека, а не кодом ошибки Telethon.
+        """
+        client = self._reader.build_client()
         self._client = client
         await client.connect()
         if not await client.is_user_authorized():
@@ -308,8 +310,14 @@ class TelegramEventListenerService:
             telegram_session_store.save_account(me)
         except Exception:
             logger.warning("Не удалось сохранить данные аккаунта", exc_info=True)
+        return client
 
-        # Активируем ДО catch-up — планировщик сразу переходит в режим skip_fetch
+    async def _go_active(self) -> None:
+        """Объявляет слушателя рабочим.
+
+        Строго до catch-up: планировщик смотрит на этот флаг и сразу перестаёт
+        опрашивать каналы сам, иначе оба пути пошли бы за одними постами.
+        """
         await self.reload_sources()
         self._active = True
         self._forget_failure()
@@ -319,6 +327,42 @@ class TelegramEventListenerService:
             f"Слушатель Telegram подключён, каналов в мониторинге: {self._watched_count}.",
         )
 
+    def _source_key(self, chat) -> object | None:
+        """Ключ отслеживаемого канала для этого чата, если мы его слушаем.
+
+        id важнее имени: у закрытого канала имени нет, а у публичного имя
+        могут сменить, и тогда по нему мы его уже не узнаем.
+        """
+        for key in (getattr(chat, "id", None), (getattr(chat, "username", None) or "").lower()):
+            if key and key in self._source_keys:
+                return key
+        return None
+
+    async def _handle_new_message(self, event, client) -> None:
+        """Входящее сообщение из любого канала, который мы слушаем."""
+        try:
+            key = self._source_key(await event.get_chat())
+            if key is None:
+                return
+            msg = event.message
+            if msg.grouped_id:
+                await self._buffer_album(key, msg, client)
+            else:
+                await self._save_single(key, msg, client)
+        except IntegrityError:
+            # Тот же пост уже записал опрос (uq_source_message). Это гонка
+            # двух здоровых путей сбора, а не потеря поста — тревожить
+            # оператора нечем.
+            logger.debug("Входящий пост уже записан опросом")
+        except Exception as exc:
+            # Было logger.debug — при уровне INFO эти строки не печатались
+            # вовсе. Пост, который не удалось сохранить, пропадал бесследно.
+            logger.warning("Ошибка при сохранении входящего поста: %s", exc, exc_info=True)
+            self._note("listener_save_error", f"Не удалось сохранить входящий пост: {exc}")
+
+    async def _connect_and_listen_locked(self) -> None:
+        client = await self._connect_authorized()
+        await self._go_active()
         await self._catchup(client)
 
         # Запустить периодическое обновление списка каналов
@@ -327,33 +371,8 @@ class TelegramEventListenerService:
 
         @client.on(events.NewMessage)
         async def _on_new_message(event):
-            try:
-                chat = await event.get_chat()
-                # id важнее имени: у закрытого канала имени нет, а у публичного
-                # имя могут сменить, и тогда по нему мы его уже не узнаем.
-                key = next(
-                    (k for k in (getattr(chat, "id", None),
-                                 (getattr(chat, "username", None) or "").lower())
-                     if k and k in self._source_keys),
-                    None,
-                )
-                if key is None:
-                    return
-                msg = event.message
-                if msg.grouped_id:
-                    await self._buffer_album(key, msg, client)
-                else:
-                    await self._save_single(key, msg, client)
-            except IntegrityError:
-                # Тот же пост уже записал опрос (uq_source_message). Это гонка
-                # двух здоровых путей сбора, а не потеря поста — тревожить
-                # оператора нечем.
-                logger.debug("Входящий пост уже записан опросом")
-            except Exception as exc:
-                # Было logger.debug — при уровне INFO эти строки не печатались
-                # вовсе. Пост, который не удалось сохранить, пропадал бесследно.
-                logger.warning("Ошибка при сохранении входящего поста: %s", exc, exc_info=True)
-                self._note("listener_save_error", f"Не удалось сохранить входящий пост: {exc}")
+            await self._handle_new_message(event, client)
+
         try:
             await client.run_until_disconnected()
         finally:
@@ -387,10 +406,10 @@ class TelegramEventListenerService:
                 if not source or not (source.username or source.telegram_channel_id):
                     continue
                 try:
-                    pending, last_msg_id, skipped_old = await self._reader._collect_pending(
+                    pending, last_msg_id, skipped_old = await self._reader.collect_pending(
                         client, db, source, limit=50
                     )
-                    count = self._reader._flush_pending(
+                    count = self._reader.flush_pending(
                         db, source, pending, last_msg_id, skipped_old
                     )
                     if count:
@@ -444,6 +463,22 @@ class TelegramEventListenerService:
 
         self._album_tasks[gid] = asyncio.create_task(_flush())
 
+    def _note_new_post(self, db, source: SourceChannel, post, last_msg_id: int, message: str) -> None:
+        """Отмечает в источнике и в журнале, что пост дошёл до базы.
+
+        Курсор двигаем через max: сообщения приходят по одному, и отставший
+        апдейт не должен откатывать источник назад.
+        """
+        source.last_message_id = max(source.last_message_id or 0, last_msg_id)
+        source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        db.add(ActionLog(
+            action="fetch_post_telethon",
+            entity_type="RawPost",
+            entity_id=str(post.id),
+            message=message,
+        ))
+        db.commit()
+
     async def _save_single(self, key, msg, client) -> None:
         if not self._db_factory:
             return
@@ -451,18 +486,10 @@ class TelegramEventListenerService:
             source = self._get_source(db, key)
             if not source:
                 return
-            media_files = await self._reader._download_media_list(source, msg.id, [msg], client)
-            post = self._reader._write_post(db, source, msg, None, media_files)
+            media_files = await self._reader.download_media_list(source, msg.id, [msg], client)
+            post = self._reader.write_post(db, source, msg, None, media_files)
             if post:
-                source.last_message_id = max(source.last_message_id or 0, msg.id)
-                source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                db.add(ActionLog(
-                    action="fetch_post_telethon",
-                    entity_type="RawPost",
-                    entity_id=str(post.id),
-                    message=f"Новый пост из {source_label(source)}",
-                ))
-                db.commit()
+                self._note_new_post(db, source, post, msg.id, f"Новый пост из {source_label(source)}")
                 logger.debug("Event: пост %d из %s", msg.id, source_label(source))
 
     async def _save_album(self, entries: list, client) -> None:
@@ -477,25 +504,18 @@ class TelegramEventListenerService:
             if not source:
                 return
             # Проверка дубля для всего альбома
-            from sqlalchemy import select as _select
-            from app.models import RawPost
-            if db.scalar(_select(RawPost).where(
+            if db.scalar(select(RawPost).where(
                 RawPost.source_id == source.id,
                 RawPost.telegram_grouped_id == anchor.grouped_id,
             )):
                 return
-            media_files = await self._reader._download_media_list(source, anchor.id, msgs, client)
-            post = self._reader._write_post(db, source, anchor, msgs, media_files)
+            media_files = await self._reader.download_media_list(source, anchor.id, msgs, client)
+            post = self._reader.write_post(db, source, anchor, msgs, media_files)
             if post:
-                source.last_message_id = max(source.last_message_id or 0, max(m.id for m in msgs))
-                source.last_fetched_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                db.add(ActionLog(
-                    action="fetch_post_telethon",
-                    entity_type="RawPost",
-                    entity_id=str(post.id),
-                    message=f"Новый альбом из {source_label(source)} ({len(media_files)} медиа)",
-                ))
-                db.commit()
+                self._note_new_post(
+                    db, source, post, max(m.id for m in msgs),
+                    f"Новый альбом из {source_label(source)} ({len(media_files)} медиа)",
+                )
                 logger.debug(
                     "Event: альбом %d из %s (%d медиа)",
                     anchor.grouped_id, source_label(source), len(media_files),

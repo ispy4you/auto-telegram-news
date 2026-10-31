@@ -10,7 +10,7 @@ def test_write_post_stores_naive_utc_from_aware_message_date(db_session, source)
     aware_date = datetime(2026, 8, 9, 23, 0, 0, tzinfo=msk)
     msg = SimpleNamespace(id=101, grouped_id=None, message="hello", date=aware_date)
 
-    post = reader._write_post(db_session, source, msg, None, [])
+    post = reader.write_post(db_session, source, msg, None, [])
 
     assert post is not None
     assert post.published_at_source.tzinfo is None
