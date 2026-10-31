@@ -1,8 +1,10 @@
 import logging
+import urllib.parse
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import Request
+from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -89,3 +91,16 @@ def parse_optional_int(value: str | None) -> int | None:
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def back_to_post(post_id: int, error: str | None = None, media_error: str | None = None) -> RedirectResponse:
+    """Ошибки генерации и ошибки медиа разные: у них разный тон и разный совет."""
+    url = f"/posts/{post_id}"
+    params = {}
+    if error:
+        params["err"] = error[:400]
+    if media_error:
+        params["media_err"] = media_error[:400]
+    if params:
+        url += "?" + urllib.parse.urlencode(params)
+    return RedirectResponse(url=url, status_code=302)
