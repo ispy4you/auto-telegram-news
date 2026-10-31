@@ -7,48 +7,8 @@
   <link rel="icon" href="/static/favicon.svg" type="image/svg+xml"/>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
-  <style>
-    body { background: #f5f6fa; }
-    #sidebar {
-      width: 220px; min-height: 100vh; background: #1a1d23;
-      position: fixed; top: 0; left: 0; z-index: 100;
-      display: flex; flex-direction: column;
-    }
-    #sidebar .brand {
-      padding: 1.2rem 1.2rem 1rem;
-      font-size: 1.05rem; font-weight: 700; color: #fff;
-      border-bottom: 1px solid #2d3139;
-      letter-spacing: .02em;
-    }
-    #sidebar .nav-link {
-      color: #a0a6b1; padding: .55rem 1.2rem;
-      display: flex; align-items: center; gap: .6rem;
-      font-size: .9rem; border-radius: 0;
-      transition: background .15s, color .15s;
-    }
-    #sidebar .nav-link:hover, #sidebar .nav-link.active {
-      background: #2d3139; color: #fff;
-    }
-    #sidebar .nav-link .bi { font-size: 1rem; flex-shrink: 0; }
-    #sidebar .badge { font-size: .68rem; padding: .2em .45em; margin-left: auto; }
-    #sidebar .section-label {
-      font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
-      color: #555b6a; padding: 1rem 1.2rem .3rem; font-weight: 600;
-    }
-    #main { margin-left: 220px; padding: 1.8rem 2rem; min-height: 100vh; }
-    @media (max-width: 768px) {
-      #sidebar { width: 100%; min-height: auto; position: relative; }
-      #main { margin-left: 0; padding: 1rem; }
-    }
-    /* Причина отказа AI. Полный текст всегда в разметке — обрезает его только
-       CSS, поэтому «подробнее» ничего не догружает и работает без сети. */
-    .reason-text {
-      display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
-      -webkit-box-orient: vertical; overflow: hidden;
-      white-space: pre-wrap; word-break: break-word;
-    }
-    .reason.open .reason-text { -webkit-line-clamp: unset; line-clamp: unset; }
-  </style>
+  <link rel="stylesheet" href="/static/app.css">
+  {% block head %}{% endblock %}
 </head>
 <body>
 
@@ -150,67 +110,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-<script>
-(function () {
-  const label = document.getElementById('sched-label');
-  const icon = document.getElementById('sched-icon');
-  const barWrap = document.getElementById('sched-bar-wrap');
-  const bar = document.getElementById('sched-bar');
-  if (!label) return;
-
-  let intervalSec = 120, nextRunAt = null, isRunning = false;
-
-  function fmt(sec) {
-    if (sec <= 0) return 'сейчас…';
-    const m = Math.floor(sec / 60), s = sec % 60;
-    return m > 0 ? `${m}м ${s}с` : `${s}с`;
-  }
-
-  function tick() {
-    if (isRunning) {
-      icon.textContent = '🔄';
-      label.textContent = 'Идёт сбор…';
-      bar.style.width = '100%';
-      return;
-    }
-    if (!nextRunAt) { label.textContent = '—'; return; }
-    const secsLeft = Math.round((nextRunAt - Date.now()) / 1000);
-    label.textContent = 'Следующий: ' + fmt(secsLeft);
-    icon.textContent = secsLeft <= 10 ? '⚡' : '⏱';
-    const pct = Math.max(0, Math.min(100, 100 - (secsLeft / intervalSec * 100)));
-    bar.style.width = pct + '%';
-  }
-
-  async function poll() {
-    try {
-      const r = await fetch('/api/scheduler-status');
-      if (!r.ok) return;
-      const d = await r.json();
-      intervalSec = d.interval_seconds || 120;
-      isRunning = d.is_running || false;
-      nextRunAt = d.next_run_at ? new Date(d.next_run_at).getTime() : null;
-      barWrap.style.display = 'block';
-    } catch (_) {}
-  }
-
-  // Фоновая вкладка таймер не показывает никому, а опрос шёл бы часами.
-  // Вернулись на вкладку — сразу обновляем, чтобы не смотреть на устаревшее.
-  poll();
-  setInterval(tick, 1000);
-  setInterval(() => { if (!document.hidden) poll(); }, 10000);
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
-})();
-</script>
-<script>
-// «Подробнее» у причины отказа. Обработчик один на страницу и висит на
-// документе: карточек на странице до полусотни, и каждой свой слушатель ни к
-// чему. На любой странице с такой карточкой это работает само.
-document.addEventListener('click', (e) => {
-  const btn = e.target.closest('.reason-more');
-  if (!btn) return;
-  const open = btn.closest('.reason').classList.toggle('open');
-  btn.textContent = open ? 'свернуть' : 'подробнее';
-});
-</script>
+<script src="/static/app.js"></script>
 </body>
 </html>
