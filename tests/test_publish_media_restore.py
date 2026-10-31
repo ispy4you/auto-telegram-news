@@ -164,7 +164,7 @@ def test_restore_borrows_the_listener_client(db_session, raw_with_missing_file, 
     monkeypatch.setattr(telegram_event_listener, "active_client", lambda: listener_client)
     monkeypatch.setattr(
         telegram_reader.TelegramReaderService,
-        "_client",
+        "build_client",
         lambda self: pytest.fail("нельзя поднимать второй клиент, пока слушатель работает"),
     )
 
@@ -179,7 +179,7 @@ def test_restore_opens_its_own_client_when_no_listener(db_session, raw_with_miss
 
     own = _FakeTelethonClient()
     monkeypatch.setattr(telegram_event_listener, "active_client", lambda: None)
-    monkeypatch.setattr(telegram_reader.TelegramReaderService, "_client", lambda self: own)
+    monkeypatch.setattr(telegram_reader.TelegramReaderService, "build_client", lambda self: own)
 
     asyncio.run(telegram_reader.TelegramReaderService().restore_media(db_session, raw_with_missing_file))
 

@@ -71,7 +71,12 @@ class TelegramReaderService:
                     self.settings.telegram_proxy_password), None
         return (socks_type, host, port), None
 
-    def _client(self) -> TelegramClient:
+    def build_client(self) -> TelegramClient:
+        """Новый Telethon-клиент на общей сессии и общем прокси.
+
+        Публичный, потому что клиента просят и слушатель, и вход в панели:
+        настройки прокси и путь к сессии должны быть у всех одни.
+        """
         if not self.settings.telegram_api_id or not self.settings.telegram_api_hash:
             raise RuntimeError("TELEGRAM_API_ID и TELEGRAM_API_HASH не заданы в .env")
 
@@ -131,7 +136,7 @@ class TelegramReaderService:
 
     async def _invite_with_own_client(self, action, invite_hash: str):
         async with _TELETHON_LOCK:
-            client = self._client()
+            client = self.build_client()
             await client.connect()
             try:
                 if not await client.is_user_authorized():
@@ -242,7 +247,7 @@ class TelegramReaderService:
     async def _do_fetch(self, db: Session, source: SourceChannel, limit: int, client=None) -> int:
         own_client = client is None
         if own_client:
-            client = self._client()
+            client = self.build_client()
             await client.connect()
         try:
             if not await client.is_user_authorized():
@@ -258,12 +263,12 @@ class TelegramReaderService:
                     "пользовательским аккаунтом — войдите заново в админке."
                 )
 
-            pending, last_msg_id, skipped_old = await self._collect_pending(client, db, source, limit)
+            pending, last_msg_id, skipped_old = await self.collect_pending(client, db, source, limit)
         finally:
             if own_client:
                 await client.disconnect()
 
-        return self._flush_pending(db, source, pending, last_msg_id, skipped_old)
+        return self.flush_pending(db, source, pending, last_msg_id, skipped_old)
 
     @staticmethod
     def _max_post_age_cutoff(db: Session) -> datetime | None:
@@ -274,13 +279,16 @@ class TelegramReaderService:
             return None
         return datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
 
-    async def _collect_pending(
+    async def collect_pending(
         self, client: TelegramClient, db: Session, source: SourceChannel, limit: int
     ) -> tuple[list[dict], int | None, int]:
         """Фаза 1: собирает сообщения и скачивает медиа. Клиент должен быть подключён.
 
         Третьим значением — сколько постов отброшено по возрасту: дырка в ленте
         должна быть объяснимой, а не выглядеть пропажей.
+
+        Публичная вместе с `flush_pending`: этой парой добирает пропущенное и
+        слушатель после переподключения, а не только обычный опрос.
         """
         albums: dict[int, list] = defaultdict(list)
         standalone_messages = []
@@ -321,7 +329,7 @@ class TelegramReaderService:
                 continue
             if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_message_id == msg.id)):
                 continue
-            media_files = await self._download_media_list(source, msg.id, [msg], client)
+            media_files = await self.download_media_list(source, msg.id, [msg], client)
             pending.append({"msg": msg, "album": None, "media_files": media_files})
 
         for grouped_id in albums:
@@ -332,7 +340,7 @@ class TelegramReaderService:
                 continue
             if db.scalar(select(RawPost).where(RawPost.source_id == source.id, RawPost.telegram_grouped_id == grouped_id)):
                 continue
-            media_files = await self._download_media_list(source, grouped_messages[0].id, grouped_messages, client)
+            media_files = await self.download_media_list(source, grouped_messages[0].id, grouped_messages, client)
             pending.append({"msg": grouped_messages[0], "album": grouped_messages, "media_files": media_files})
 
         if skipped_old:
@@ -341,7 +349,7 @@ class TelegramReaderService:
         last_msg_id = max((m.id for m in messages), default=None)
         return pending, last_msg_id, skipped_old
 
-    def _flush_pending(
+    def flush_pending(
         self,
         db: Session,
         source: SourceChannel,
@@ -349,10 +357,14 @@ class TelegramReaderService:
         last_msg_id: int | None,
         skipped_old: int = 0,
     ) -> int:
-        """Фаза 2: записывает накопленные посты в DB."""
+        """Фаза 2: записывает накопленные посты в DB.
+
+        Вызывается внутри сессии, когда скачивание уже позади, — поэтому
+        фазы и разделены.
+        """
         new_count = 0
         for item in pending:
-            post = self._write_post(db, source, item["msg"], item["album"], item["media_files"])
+            post = self.write_post(db, source, item["msg"], item["album"], item["media_files"])
             if post:
                 new_count += 1
 
@@ -451,7 +463,7 @@ class TelegramReaderService:
     async def _do_restore_media(self, db: Session, source: SourceChannel, raw_post: RawPost, missing: list, client) -> int:
         own_client = client is None
         if own_client:
-            client = self._client()
+            client = self.build_client()
             await client.connect()
         try:
             if not await client.is_user_authorized():
@@ -464,7 +476,7 @@ class TelegramReaderService:
             messages = [m for m in await client.get_messages(entity, ids=ids) if m is not None]
             if not messages:
                 return 0
-            files = await self._download_media_list(source, raw_post.telegram_message_id, messages, client)
+            files = await self.download_media_list(source, raw_post.telegram_message_id, messages, client)
         finally:
             if own_client:
                 await client.disconnect()
@@ -482,8 +494,14 @@ class TelegramReaderService:
             db.commit()
         return restored
 
-    async def _download_media_list(self, source: SourceChannel, anchor_msg_id: int, msgs: list, client: TelegramClient) -> list[dict]:
-        """Скачивает медиафайлы на диск. Не трогает DB."""
+    async def download_media_list(self, source: SourceChannel, anchor_msg_id: int, msgs: list, client: TelegramClient) -> list[dict]:
+        """Скачивает медиафайлы на диск. Не трогает DB.
+
+        Публичный метод, потому что пост в базу пишут два пути — опрос
+        каналов и живой слушатель, — и оба скачивают медиа одинаково.
+        Слушатель раньше вызывал эту пару через подчёркивание, то есть
+        держался за внутренности соседнего модуля.
+        """
         result = []
         for i, msg in enumerate(msgs):
             if not msg.media:
@@ -523,8 +541,12 @@ class TelegramReaderService:
             })
         return result
 
-    def _write_post(self, db: Session, source: SourceChannel, msg, album_messages, media_files: list[dict]):
-        """Записывает пост и медиа в DB. Никакого async I/O."""
+    def write_post(self, db: Session, source: SourceChannel, msg, album_messages, media_files: list[dict]):
+        """Записывает пост и медиа в DB. Никакого async I/O.
+
+        Вторая половина общего пути: сначала `download_media_list` скачивает
+        файлы вне сессии, потом этот метод пишет пост внутри неё.
+        """
         # Повторная проверка дубля: между collect_pending и здесь могла сработать
         # другая корутина (event listener / параллельный fetch) и вставить тот же пост.
         if db.scalar(select(RawPost).where(

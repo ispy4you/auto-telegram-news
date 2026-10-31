@@ -62,7 +62,7 @@ def _collect(db, source, messages, limit=3):
     reader = TelegramReaderService()
     client = _Client(messages)
     pending, last_id, skipped = asyncio.run(
-        reader._collect_pending(client, db, source, limit)
+        reader.collect_pending(client, db, source, limit)
     )
     return reader, client, pending, last_id, skipped
 
@@ -95,7 +95,7 @@ def test_the_queue_is_drained_over_several_runs(db_session, source):
     for _ in range(3):
         reader, _, pending, last_id, _ = _collect(db_session, source, messages, limit=3)
         seen += [item["msg"].id for item in pending]
-        reader._flush_pending(db_session, source, pending, last_id)
+        reader.flush_pending(db_session, source, pending, last_id)
 
     assert seen == [11, 12, 13, 14, 15, 16, 17]
 
@@ -134,7 +134,7 @@ def test_the_journal_explains_the_gap(db_session, source):
     settings_registry.store(db_session, {"max_post_age_hours": "24"})
     reader = TelegramReaderService()
 
-    reader._flush_pending(db_session, source, [], 42, skipped_old=7)
+    reader.flush_pending(db_session, source, [], 42, skipped_old=7)
 
     entry = db_session.query(ActionLog).filter_by(action="fetch_skipped_old").one()
     assert "пропущено 7 постов" in entry.message
@@ -149,7 +149,7 @@ def test_the_gap_is_explained_once_an_hour(db_session, source):
     reader = TelegramReaderService()
 
     for _ in range(5):
-        reader._flush_pending(db_session, source, [], 42, skipped_old=50)
+        reader.flush_pending(db_session, source, [], 42, skipped_old=50)
 
     assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 1
 
@@ -158,11 +158,11 @@ def test_an_hour_later_the_gap_is_mentioned_again(db_session, source):
     settings_registry.store(db_session, {"max_post_age_hours": "24"})
     reader = TelegramReaderService()
 
-    reader._flush_pending(db_session, source, [], 42, skipped_old=50)
+    reader.flush_pending(db_session, source, [], 42, skipped_old=50)
     stale = db_session.query(ActionLog).filter_by(action="fetch_skipped_old").one()
     stale.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=2)
     db_session.commit()
-    reader._flush_pending(db_session, source, [], 43, skipped_old=50)
+    reader.flush_pending(db_session, source, [], 43, skipped_old=50)
 
     assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 2
 
@@ -176,8 +176,8 @@ def test_another_source_is_not_silenced_by_the_first(db_session, source):
     db_session.commit()
     reader = TelegramReaderService()
 
-    reader._flush_pending(db_session, source, [], 42, skipped_old=10)
-    reader._flush_pending(db_session, other, [], 42, skipped_old=10)
+    reader.flush_pending(db_session, source, [], 42, skipped_old=10)
+    reader.flush_pending(db_session, other, [], 42, skipped_old=10)
 
     assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").count() == 2
 
@@ -185,7 +185,7 @@ def test_another_source_is_not_silenced_by_the_first(db_session, source):
 def test_nothing_is_written_when_nothing_was_dropped(db_session, source):
     reader = TelegramReaderService()
 
-    reader._flush_pending(db_session, source, [], 42, skipped_old=0)
+    reader.flush_pending(db_session, source, [], 42, skipped_old=0)
 
     assert db_session.query(ActionLog).filter_by(action="fetch_skipped_old").all() == []
 
@@ -198,7 +198,7 @@ def test_a_normal_batch_still_reports_what_it_collected(db_session, source):
         db_session, source, [_message(11), _message(12)], limit=10
     )
 
-    assert reader._flush_pending(db_session, source, pending, last_id) == 2
+    assert reader.flush_pending(db_session, source, pending, last_id) == 2
     actions = [row.action for row in db_session.query(ActionLog).all()]
     assert actions == ["fetch_post_telethon"]
     assert db_session.query(RawPost).count() == 2

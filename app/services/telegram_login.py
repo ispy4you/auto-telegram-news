@@ -106,7 +106,7 @@ class TelegramLoginService:
                         "Telegram занят фоновым сбором. Подождите полминуты и попробуйте снова."
                     )
                 self._lock_acquired = True
-            self._client = self._reader._client()
+            self._client = self._reader.build_client()
             await self._client.connect()
         return self._client
 

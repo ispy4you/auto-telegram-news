@@ -273,7 +273,7 @@ def test_logging_in_does_not_deadlock_against_a_connected_listener(monkeypatch):
 
     listener = _ConnectedListener()
     service = login_module.TelegramLoginService(listener, lambda: None)
-    monkeypatch.setattr(service._reader, "_client", lambda: _FakeClient())
+    monkeypatch.setattr(service._reader, "build_client", lambda: _FakeClient())
 
     async def _scenario():
         await listener.hold()
@@ -399,17 +399,17 @@ def test_starting_the_listener_twice_leaves_one_loop(listener):
 class _CollidingReader:
     """Догон падает на уникальном индексе: тот же пост уже записал опрос."""
 
-    async def _collect_pending(self, client, db, src, limit=50):
+    async def collect_pending(self, client, db, src, limit=50):
         return [], None, 0
 
-    def _flush_pending(self, db, src, pending, last_msg_id, skipped_old=0):
+    def flush_pending(self, db, src, pending, last_msg_id, skipped_old=0):
         from sqlalchemy.exc import IntegrityError
 
         raise IntegrityError("INSERT", {}, Exception("uq_source_message"))
 
 
 class _BrokenReader:
-    async def _collect_pending(self, client, db, src, limit=50):
+    async def collect_pending(self, client, db, src, limit=50):
         raise RuntimeError("канал недоступен")
 
 
