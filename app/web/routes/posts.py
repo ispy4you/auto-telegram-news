@@ -1,20 +1,18 @@
 import urllib.parse
-from dataclasses import replace
-from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from app.database import SessionLocal, get_db
-from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, MediaItem, MediaOrigin, RawPost, RawPostStatus, SourceChannel, TargetChannel
-from app.services import markdown_entities, media_restore, media_storage, message_entities, post_lifecycle, prompts
-from app.services.ai_gateway import AiGatewayClient, AiResult, GenerationFailed
+from app.database import get_db
+from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, RawPost, RawPostStatus, SourceChannel, TargetChannel
+from app.services import media_restore, media_storage, post_generation, post_lifecycle, prompts
+from app.services.ai_gateway import GenerationFailed
 from app.services.news_pipeline import NewsPipelineService
 from app.services.telegram_publisher import TelegramPublisherService
 from app.web.auth import require_auth
-from app.web.routes.common import POSTS_PER_PAGE, current_project_id, parse_optional_int, tpl
+from app.web.routes.common import POSTS_PER_PAGE, back_to_post, current_project_id, parse_optional_int, tpl
 
 router = APIRouter()
 
@@ -73,72 +71,6 @@ def posts(
     })
 
 
-async def _request_generation(post: RawPost, db: Session, prompt_id: int | None = None) -> AiResult:
-    """Спрашивает модель и отделяет отказ редактора от поломки.
-
-    Техническую ошибку — недоступный шлюз, сломанный шаблон промпта — поднимаем
-    наверх и пост не трогаем: раньше такая ошибка отклоняла новость навсегда,
-    хотя после починки причины её достаточно сгенерировать заново.
-    """
-    # Без выбора промпт не подставляем: шлюз сам возьмёт основной. Так «ничего
-    # не выбрали» остаётся одним состоянием, а не двумя одинаковыми на вид.
-    rules = prompts.rules_for(db, prompt_id) if prompt_id else None
-    result = await AiGatewayClient().generate_news_post(post, db, rules=rules)
-    if result.failed:
-        db.add(ActionLog(action="ai_error", entity_type="RawPost", entity_id=str(post.id), message=result.reason[:500]))
-        db.commit()
-        raise GenerationFailed(result.reason)
-
-    if result.suitable and not result.text.strip():
-        return replace(
-            result,
-            suitable=False,
-            text="",
-            reason="AI вернул пустой текст — возможно, обрезан лимитом токенов или промпт не дал результата",
-        )
-    return result
-
-
-def _save_generation(post: RawPost, result: AiResult, db: Session) -> None:
-    # Модель пишет markdown; Telegram такой текст показывает со звёздочками,
-    # поэтому разметку разбираем сразу — её увидят и редактор, и предпросмотр.
-    text, marks = markdown_entities.parse(result.text)
-    db.add(GeneratedPost(
-        raw_post_id=post.id,
-        generated_text=text,
-        generated_entities=message_entities.dumps(marks),
-        model_name=result.model_name,
-        status=GeneratedPostStatus.DRAFT.value if result.suitable else GeneratedPostStatus.REJECTED.value,
-        generation_error=result.reason if not result.suitable else None,
-    ))
-    if result.suitable:
-        post_lifecycle.mark_generated(post)
-    else:
-        post_lifecycle.reject(post)
-    post.ai_suitable = result.suitable
-    post.ai_skip_reason = result.reason if not result.suitable else None
-    db.commit()
-
-
-async def _generate_single_post(post: RawPost, db: Session, prompt_id: int | None = None) -> None:
-    _save_generation(post, await _request_generation(post, db, prompt_id), db)
-
-
-async def _bulk_generate_task(ids: list[int]) -> None:
-    with SessionLocal() as db:
-        posts_q = db.scalars(select(RawPost).where(RawPost.id.in_(ids))).all()
-        for p in posts_q:
-            try:
-                await _generate_single_post(p, db)
-            except GenerationFailed:
-                # Причина одна на всю пачку — она уже в журнале как ai_error,
-                # а остальные посты незачем прогонять по тем же граблям.
-                break
-            except Exception as exc:
-                db.add(ActionLog(action="bulk_generate_error", entity_type="RawPost", entity_id=str(p.id), message=str(exc)))
-                db.commit()
-
-
 @router.post("/posts/bulk")
 async def posts_bulk(
     request: Request,
@@ -162,7 +94,7 @@ async def posts_bulk(
         post_lifecycle.delete_posts(db, list(posts_q))
         db.commit()
     elif action == "generate":
-        background_tasks.add_task(_bulk_generate_task, ids)
+        background_tasks.add_task(post_generation.generate_many, ids)
         return RedirectResponse(url="/posts", status_code=302)
 
     return RedirectResponse(url="/posts", status_code=302)
@@ -212,177 +144,11 @@ def post_detail(
     })
 
 
-@router.post("/posts/{post_id}/restore-media")
-async def restore_post_media(post_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    """Перекачивает пропавшее медиа. Страница поста дёргает это сама при открытии."""
-    post = db.scalar(
-        select(RawPost)
-        .options(joinedload(RawPost.source), selectinload(RawPost.media_items))
-        .where(RawPost.id == post_id)
-    )
-    if not post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    return await media_restore.restore(db, post)
-
-
-def _media_post(db: Session, post_id: int) -> RawPost | None:
-    return db.scalar(
-        select(RawPost).options(selectinload(RawPost.media_items)).where(RawPost.id == post_id)
-    )
-
-
-def _discard(saved: list[dict]) -> None:
-    for item in saved:
-        Path(item["path"]).unlink(missing_ok=True)
-
-
-def _sync_media_counters(db: Session, post: RawPost) -> None:
-    """has_media и media_count — не украшение: по ним решают, что публиковать."""
-    count = db.scalar(
-        select(func.count()).select_from(MediaItem).where(MediaItem.raw_post_id == post.id)
-    ) or 0
-    post.media_count = count
-    post.has_media = count > 0
-
-
-@router.post("/posts/{post_id}/media")
-async def add_post_media(
-    post_id: int,
-    files: list[UploadFile] = File(default=[]),
-    db: Session = Depends(get_db),
-    _: bool = Depends(require_auth),
-):
-    """Своё фото или видео вместо того, что пришло из канала.
-
-    Файл ложится на диск и живёт до ближайшего перезапуска: восстановить его
-    неоткуда, и панель об этом честно скажет.
-    """
-    post = _media_post(db, post_id)
-    if not post:
-        return RedirectResponse(url="/posts", status_code=302)
-
-    chosen = [upload for upload in files if upload.filename]
-    if not chosen:
-        return _back_to_post(post_id, media_error="Файлы не выбраны.")
-
-    limit = media_storage.MAX_ITEMS_PER_POST
-    room = limit - len(post.media_items)
-    if room <= 0:
-        return _back_to_post(post_id, media_error=f"В посте уже {limit} файлов — больше Telegram в альбом не соберёт.")
-    if len(chosen) > room:
-        return _back_to_post(post_id, media_error=f"Влезет ещё {room}: в альбоме Telegram не больше {limit} файлов.")
-
-    storage = media_storage.MediaStorageService()
-    saved: list[dict] = []
-    try:
-        for upload in chosen:
-            saved.append(await storage.save_upload(upload, post.source_id, post.id, db))
-    except media_storage.UploadRejected as exc:
-        # Всё или ничего: половина загруженного альбома хуже, чем понятный отказ.
-        _discard(saved)
-        return _back_to_post(post_id, media_error=str(exc))
-    except Exception:
-        # Кончилось место, сорвался диск — файлов в базе быть не должно, а
-        # недописанным огрызкам на диске тем более.
-        _discard(saved)
-        raise
-
-    last = max((item.sort_order for item in post.media_items), default=-1)
-    for offset, item in enumerate(saved, start=1):
-        db.add(MediaItem(
-            raw_post_id=post.id,
-            # Сообщения в Telegram у такого файла нет, и восстановление его не ищет.
-            telegram_message_id=0,
-            media_type=item["media_type"],
-            file_path=item["path"],
-            file_size=item["file_size"],
-            mime_type=item["mime_type"],
-            sort_order=last + offset,
-            origin=MediaOrigin.MANUAL.value,
-        ))
-    db.flush()
-    _sync_media_counters(db, post)
-    db.add(ActionLog(
-        action="media_added",
-        entity_type="RawPost",
-        entity_id=str(post.id),
-        message=f"Добавлено файлов вручную: {len(saved)}",
-    ))
-    db.commit()
-    return _back_to_post(post_id)
-
-
-@router.post("/posts/{post_id}/media/{item_id}/delete")
-def delete_post_media(post_id: int, item_id: int, db: Session = Depends(get_db), _: bool = Depends(require_auth)):
-    post = _media_post(db, post_id)
-    item = db.get(MediaItem, item_id)
-    if not post or not item or item.raw_post_id != post_id:
-        return _back_to_post(post_id)
-
-    Path(item.file_path).unlink(missing_ok=True)
-    db.delete(item)
-    db.flush()
-    _sync_media_counters(db, post)
-    db.add(ActionLog(
-        action="media_deleted",
-        entity_type="RawPost",
-        entity_id=str(post.id),
-        message=f"Удалён файл #{item_id}",
-    ))
-    db.commit()
-    return _back_to_post(post_id)
-
-
-@router.post("/posts/{post_id}/media/{item_id}/move")
-def move_post_media(
-    post_id: int,
-    item_id: int,
-    direction: str = Form(...),
-    db: Session = Depends(get_db),
-    _: bool = Depends(require_auth),
-):
-    """Порядок файлов = порядок в альбоме, а первый ещё и несёт подпись."""
-    post = _media_post(db, post_id)
-    if not post:
-        return _back_to_post(post_id)
-
-    if direction not in ("up", "down"):
-        return _back_to_post(post_id)
-
-    items = sorted(post.media_items, key=lambda m: (m.sort_order, m.id))
-    current = next((index for index, m in enumerate(items) if m.id == item_id), None)
-    if current is None:
-        return _back_to_post(post_id)
-
-    neighbour = current - 1 if direction == "up" else current + 1
-    if 0 <= neighbour < len(items):
-        items[current], items[neighbour] = items[neighbour], items[current]
-    # Перенумеровываем целиком: часть постов приехала с одинаковым sort_order,
-    # и обмен значениями на них не работал бы.
-    for order, item in enumerate(items):
-        item.sort_order = order
-    db.commit()
-    return _back_to_post(post_id)
-
-
 async def _do_generate(post_id: int, db: Session, prompt_id: int | None = None) -> None:
     post = db.get(RawPost, post_id)
     if not post:
         return
     await _generate_single_post(post, db, prompt_id)
-
-
-def _back_to_post(post_id: int, error: str | None = None, media_error: str | None = None) -> RedirectResponse:
-    """Ошибки генерации и ошибки медиа разные: у них разный тон и разный совет."""
-    url = f"/posts/{post_id}"
-    params = {}
-    if error:
-        params["err"] = error[:400]
-    if media_error:
-        params["media_err"] = media_error[:400]
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    return RedirectResponse(url=url, status_code=302)
 
 
 @router.post("/posts/{post_id}/generate")
@@ -393,10 +159,10 @@ async def generate_post(
     _: bool = Depends(require_auth),
 ):
     try:
-        await _do_generate(post_id, db, prompt_id)
+        await post_generation.generate_by_id(post_id, db, prompt_id)
     except GenerationFailed as exc:
-        return _back_to_post(post_id, str(exc))
-    return _back_to_post(post_id)
+        return back_to_post(post_id, str(exc))
+    return back_to_post(post_id)
 
 
 @router.post("/posts/{post_id}/edit-draft")
@@ -430,9 +196,9 @@ async def regenerate_post(
     # Сначала новый текст, потом отказ от старого: иначе сорвавшаяся генерация
     # оставляла пост вообще без черновика.
     try:
-        result = await _request_generation(post, db, prompt_id)
+        result = await post_generation.ask_model(post, db, prompt_id)
     except GenerationFailed as exc:
-        return _back_to_post(post_id, str(exc))
+        return back_to_post(post_id, str(exc))
 
     existing_drafts = db.scalars(
         select(GeneratedPost).where(
@@ -443,8 +209,8 @@ async def regenerate_post(
     for gp in existing_drafts:
         gp.status = GeneratedPostStatus.REJECTED.value
     db.flush()
-    _save_generation(post, result, db)
-    return _back_to_post(post_id)
+    post_generation.save(post, result, db)
+    return back_to_post(post_id)
 
 
 @router.post("/posts/{post_id}/publish-raw")
