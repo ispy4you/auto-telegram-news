@@ -1,2 +1,44 @@
-body { padding-bottom: 40px; }
-pre { white-space: pre-wrap; }
+/* Общая шапка панели: боковое меню, карточки, таблицы.
+   Файл с первого коммита лежал пустым и никем не подключённым, а стили
+   жили внутри <style> в base.html. Теперь наоборот. */
+
+body { background: #f5f6fa; }
+#sidebar {
+  width: 220px; min-height: 100vh; background: #1a1d23;
+  position: fixed; top: 0; left: 0; z-index: 100;
+  display: flex; flex-direction: column;
+}
+#sidebar .brand {
+  padding: 1.2rem 1.2rem 1rem;
+  font-size: 1.05rem; font-weight: 700; color: #fff;
+  border-bottom: 1px solid #2d3139;
+  letter-spacing: .02em;
+}
+#sidebar .nav-link {
+  color: #a0a6b1; padding: .55rem 1.2rem;
+  display: flex; align-items: center; gap: .6rem;
+  font-size: .9rem; border-radius: 0;
+  transition: background .15s, color .15s;
+}
+#sidebar .nav-link:hover, #sidebar .nav-link.active {
+  background: #2d3139; color: #fff;
+}
+#sidebar .nav-link .bi { font-size: 1rem; flex-shrink: 0; }
+#sidebar .badge { font-size: .68rem; padding: .2em .45em; margin-left: auto; }
+#sidebar .section-label {
+  font-size: .68rem; text-transform: uppercase; letter-spacing: .08em;
+  color: #555b6a; padding: 1rem 1.2rem .3rem; font-weight: 600;
+}
+#main { margin-left: 220px; padding: 1.8rem 2rem; min-height: 100vh; }
+@media (max-width: 768px) {
+  #sidebar { width: 100%; min-height: auto; position: relative; }
+  #main { margin-left: 0; padding: 1rem; }
+}
+/* Причина отказа AI. Полный текст всегда в разметке — обрезает его только
+   CSS, поэтому «подробнее» ничего не догружает и работает без сети. */
+.reason-text {
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3;
+  -webkit-box-orient: vertical; overflow: hidden;
+  white-space: pre-wrap; word-break: break-word;
+}
+.reason.open .reason-text { -webkit-line-clamp: unset; line-clamp: unset; }
