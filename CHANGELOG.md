@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.8.0...v1.8.1) (2026-10-31)
+
+
+### Bug Fixes
+
+* статистика считает по проекту и по часовому поясу панели ([#73](https://github.com/ispy4you/auto-telegram-news/issues/73)) ([0cdefe8](https://github.com/ispy4you/auto-telegram-news/commit/0cdefe83dcee5c946d93c92526634b09af0c816a))
+
 ## [1.8.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.7.1...v1.8.0) (2026-10-30)
 
 
