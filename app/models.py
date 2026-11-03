@@ -272,3 +272,28 @@ class ActionLog(Base):
     entity_id: Mapped[str] = mapped_column(String(64))
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+
+class AdminLog(Base):
+    """Журнал действий человека в панели — отдельно от журнала событий системы.
+
+    В action_logs пишет конвейер: сбор, генерация, публикация. Если подмешать
+    туда нажатия оператора, они утонут — на одно нажатие приходится несколько
+    десятков записей робота, а на главной показываются последние пятнадцать.
+
+    Поэтому своя таблица: вход в панель, смена настроек, всё, что меняет
+    состояние. У каждой записи есть адрес, с которого пришёл запрос, и код
+    ответа — по ним видно и чужие попытки, и отказы.
+    """
+
+    __tablename__ = "admin_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action: Mapped[str] = mapped_column(String(64), index=True)
+    actor: Mapped[str] = mapped_column(String(64))
+    authenticated: Mapped[bool] = mapped_column(Boolean, default=False)
+    method: Mapped[str] = mapped_column(String(8))
+    path: Mapped[str] = mapped_column(String(255))
+    status: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)

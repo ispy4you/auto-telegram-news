@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="fw-semibold mb-0">Логи <span class="text-muted fw-normal fs-6">({{ total }})</span></h4>
+</div>
+
+{% include "_log_tabs.html" %}
+
+{# Фильтр: событие выбирается из того, что в журнале уже есть #}
+<form method="get" class="row g-2 mb-3">
+  <div class="col-md-4">
+    <select class="form-select" name="action">
+      <option value="">Все действия</option>
+      {% for a in all_actions %}
+      <option value="{{ a }}" {% if filters.action == a %}selected{% endif %}>{{ a | action_label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-4">
+    <input class="form-control" name="q" placeholder="Поиск по действию или адресу" value="{{ filters.q }}">
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-primary">Фильтр</button>
+    <a href="/logs/admin" class="btn btn-outline-secondary">Сброс</a>
+  </div>
+</form>
+
+<div class="card">
+  <div class="card-body p-0">
+    <table class="table table-sm table-hover mb-0 align-middle">
+      <thead class="table-light">
+        <tr>
+          <th class="ps-3" style="width:140px">Время</th>
+          <th style="width:150px">Адрес</th>
+          <th>Что сделано</th>
+          <th style="width:220px">Запрос</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for l in items %}
+        {% set icon_map = {
+          'login': ('bi-box-arrow-in-right', 'text-success'),
+          'login_failed': ('bi-shield-exclamation', 'text-warning'),
+          'login_locked': ('bi-shield-lock-fill', 'text-danger'),
+          'settings': ('bi-sliders', 'text-primary'),
+          'source': ('bi-rss', 'text-primary'),
+          'target': ('bi-broadcast', 'text-info'),
+          'project': ('bi-collection', 'text-primary'),
+          'prompt': ('bi-chat-left-text', 'text-primary'),
+          'post': ('bi-file-text', 'text-secondary'),
+          'draft': ('bi-pencil-square', 'text-secondary'),
+          'media': ('bi-image', 'text-secondary'),
+          'tg': ('bi-telegram', 'text-info'),
+          'fetch': ('bi-cloud-download', 'text-primary'),
+          'routes': ('bi-diagram-3', 'text-primary'),
+          'compose': ('bi-pencil', 'text-secondary'),
+          'test': ('bi-bell', 'text-info'),
+        } %}
+        {% set icon = icon_map.get(l.action, icon_map.get(l.action.split('_')[0], ('bi-dot', 'text-muted'))) %}
+        {# Отказы и попытки входа подсвечиваем: их ищут на этой странице чаще всего #}
+        <tr class="{% if l.status >= 500 or l.action == 'login_locked' %}table-danger
+          {%- elif l.status >= 400 or l.action == 'login_failed' %}table-warning{% endif %}">
+          <td class="ps-3 text-muted small text-nowrap">{{ l.created_at | localdt(display_tz, '%d.%m %H:%M:%S') }}</td>
+          <td class="small text-nowrap">
+            {{ l.actor }}
+            {% if not l.authenticated %}<span class="badge bg-secondary-subtle text-secondary-emphasis">гость</span>{% endif %}
+          </td>
+          <td class="small" style="word-break:break-word">
+            <i class="bi {{ icon[0] }} {{ icon[1] }} me-1"></i>{{ l.message }}
+          </td>
+          <td class="text-muted small text-nowrap" style="max-width:220px;overflow:hidden;text-overflow:ellipsis">
+            {{ l.method }} {{ l.path }} → {{ l.status }}
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4" class="text-muted text-center py-4">Действий нет</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% include "_pagination.html" %}
+{% endblock %}

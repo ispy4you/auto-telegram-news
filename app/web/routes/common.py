@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import GeneratedPost, GeneratedPostStatus, Project, RawPost, SourceChannel
 from app.services.prompt_settings import get_display_timezone
+from app.web import admin_journal
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,8 @@ def _localdt_filter(dt, tz_name: str, fmt: str = "%d.%m.%Y %H:%M") -> str:
 
 
 templates.env.filters["localdt"] = _localdt_filter
+# Журнал хранит событие кодом вроде source_delete — в разметке он ни к чему.
+templates.env.filters["action_label"] = admin_journal.label
 
 
 def current_project_id(request: Request, db: Session) -> int | None:

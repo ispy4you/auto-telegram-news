@@ -9,7 +9,7 @@ from app.database import SessionLocal
 from app.models import ActionLog, GeneratedPost, GeneratedPostStatus, PublishJob, PublishJobStatus, RawPost
 from app.services.news_pipeline import NewsPipelineService
 from app.services import media_cache, post_lifecycle, settings_registry
-from app.services.retention import prune_action_logs
+from app.services.retention import prune_action_logs, prune_admin_logs
 from app.services.telegram_publisher import TelegramPublisherService
 
 logger = logging.getLogger(__name__)
@@ -207,6 +207,7 @@ class SchedulerService:
         self._last_prune_at = now
         try:
             prune_action_logs(db)
+            prune_admin_logs(db)
         except Exception:
             logger.warning("Не удалось почистить журнал", exc_info=True)
             db.rollback()

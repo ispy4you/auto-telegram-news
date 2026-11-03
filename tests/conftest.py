@@ -42,7 +42,7 @@ CSRF_INPUT = re.compile(r'name="csrf_token"\s+value="([^"]+)"')
 
 
 @pytest.fixture
-def client(db_session):
+def client(db_session, monkeypatch):
     """Приложение поверх тестовой базы.
 
     TestClient создаётся без контекстного менеджера: тогда Starlette не запускает
@@ -50,11 +50,15 @@ def client(db_session):
     """
     import app.main as main_module
     from app.web import auth as auth_module
+    from app.web import request_log
 
     db_session.add(Project(id=1, name="Default", slug="default"))
     db_session.commit()
 
     main_module.app.dependency_overrides[get_db] = lambda: db_session
+    # Журнал действий пишется своей сессией, в обход зависимости запроса:
+    # без подмены он полез бы в настоящую базу на каждый POST в тестах.
+    monkeypatch.setattr(request_log, "journal_session", sessionmaker(bind=db_session.get_bind()))
     auth_module._failed_attempts.clear()  # счётчик попыток живёт в памяти процесса
     try:
         yield TestClient(main_module.app, follow_redirects=False)

@@ -188,9 +188,12 @@ flowchart TD
 - Per-target-channel breakdown with progress bars.
 
 ### Logging & audit
-- Full history of user actions and system events.
-- Filterable by event type and text.
-- Paginated (100 records per page).
+- Two journals on one page: system events and admin actions.
+- The admin journal records panel logins (failed attempts and lockouts included)
+  and every change to settings, sources, channels, prompts and posts: who, from
+  which address, what they did and what the panel answered.
+- Each journal has its own filter: by event and by text (admin actions also by address).
+- Paginated (100 records per page); both share the same retention setting.
 
 ### Security
 - Session-based auth with constant-time HMAC comparison.
