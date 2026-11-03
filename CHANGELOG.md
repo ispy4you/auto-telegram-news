@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/ispy4you/auto-telegram-news/compare/v1.8.1...v1.9.0) (2026-11-03)
+
+
+### Features
+
+* журнал действий администратора ([#76](https://github.com/ispy4you/auto-telegram-news/issues/76)) ([589373b](https://github.com/ispy4you/auto-telegram-news/commit/589373ba7f81385ec82596e937a101e23e08d6cf))
+
 ## [1.8.1](https://github.com/ispy4you/auto-telegram-news/compare/v1.8.0...v1.8.1) (2026-10-31)
 
 
