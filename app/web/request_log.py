@@ -27,6 +27,11 @@ from app.web.auth import SESSION_KEY
 
 logger = logging.getLogger(__name__)
 
+#: Методы, которыми что-то меняют. Остальное — чтение, его в журнал не пишем.
+#: Проверять «не GET» нельзя: хостинг дёргает проверку живости методом HEAD,
+#: а FastAPI отвечает на него 405 — журнал забивался бы этим круглосуточно.
+_CHANGING = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+
 #: Фабрика сессий для журнала. Своя, а не зависимость запроса: запрос к этому
 #: моменту уже завершён, а его сессия закрыта. Тесты её подменяют.
 journal_session = SessionLocal
@@ -107,7 +112,7 @@ class ActionLogMiddleware:
                 "%s %s от %s → %s за %dмс",
                 request.method, request.url.path, who(request), status, took_ms,
             )
-        if request.method != "GET":
+        if request.method in _CHANGING:
             await self._journal(request, status, location)
 
     @staticmethod

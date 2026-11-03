@@ -6,6 +6,7 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import func, select
 
 from app.models import ActionLog, AdminLog, SourceChannel
@@ -93,6 +94,31 @@ def test_a_refusal_is_visible_in_the_entry(client, db_session):
     assert _one(db_session, "project_add").message.endswith("— отказ 403")
 
 
+def test_a_crashed_action_is_recorded_too(client, db_session, csrf, monkeypatch):
+    """Упавшее нажатие — первое, что ищут в журнале."""
+    import app.main as main_module
+    from sqlalchemy.orm import sessionmaker
+
+    async def boom():
+        raise RuntimeError("упало")
+
+    # Обработчик ошибок в main пишет своим журналом — его тоже в тестовую базу.
+    monkeypatch.setattr(main_module, "journal_session", sessionmaker(bind=db_session.get_bind()))
+    main_module.app.add_api_route("/__boom", boom, methods=["POST"], include_in_schema=False)
+    try:
+        with pytest.raises(RuntimeError):
+            client.post("/__boom", data={"csrf_token": csrf(client)})
+    finally:
+        main_module.app.router.routes = [
+            route for route in main_module.app.router.routes
+            if getattr(route, "path", "") != "/__boom"
+        ]
+
+    entry = _one(db_session, "other")
+    assert entry.status == 500
+    assert "/__boom" in entry.message
+
+
 def test_an_unknown_path_is_still_recorded(client, db_session):
     """Новый обработчик не должен молча выпадать из журнала."""
     client.post("/зачем-то-новое", data={})
@@ -117,6 +143,28 @@ def test_requests_the_page_sends_by_itself_are_not_clicks(logged_in, db_session,
     logged_in.post("/posts/404/restore-media", data={"csrf_token": csrf(logged_in, "/posts")})
 
     assert len(_entries(db_session)) == before
+
+
+def test_liveness_probes_do_not_reach_the_journal(client, db_session):
+    """Хостинг дёргает /health методом HEAD каждые несколько секунд.
+
+    FastAPI отвечает на HEAD кодом 405, и проверка «метод не GET» затягивала
+    в журнал по записи на каждый такой стук — за сутки тысячи строк.
+    """
+    for _ in range(3):
+        client.head("/health")
+    client.options("/health")
+
+    assert _entries(db_session) == []
+
+
+def test_a_very_long_path_does_not_blow_up_the_entry(client, db_session):
+    """Длину пути задаёт тот, кто отправил запрос, а не мы."""
+    client.post("/" + "ы" * 5000)
+
+    entry = _one(db_session, "other")
+    assert len(entry.message) < 600
+    assert len(entry.path) <= 255
 
 
 def test_the_pipeline_journal_stays_clean(logged_in, db_session, csrf):

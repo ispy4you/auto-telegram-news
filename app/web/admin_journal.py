@@ -99,11 +99,16 @@ _LOGIN_OUTCOMES = {
 
 _OTHER = "other"
 
-#: Название события для фильтра — та же фраза, но без номера объекта.
-_LABELS: dict[str, str] = dict(_LOGIN_OUTCOMES)
-for _r in _RULES:
-    _LABELS.setdefault(_r.action, re.sub(r"\s*#\{\}", "", _r.what))
-_LABELS[_OTHER] = "Прочее"
+def _build_labels() -> dict[str, str]:
+    """Название события для фильтра — та же фраза, но без номера объекта."""
+    labels = dict(_LOGIN_OUTCOMES)
+    for rule in _RULES:
+        labels.setdefault(rule.action, re.sub(r"\s*#\{\}", "", rule.what))
+    labels[_OTHER] = "Прочее"
+    return labels
+
+
+_LABELS = _build_labels()
 
 
 def label(action: str) -> str:
@@ -158,6 +163,8 @@ def record(
     if described is None:
         return
     action, message = described
+    # Путь приходит из запроса: длину строки задаёт тот, кто его отправил.
+    message = message[:500]
     if status >= 400:
         message = f"{message} — отказ {status}"
     try:
